@@ -317,11 +317,19 @@ function generateChainWorkflows(
   // 最終PRマージ後の元PRクローズ
   if (prs.length > 0) {
     const lastPR = prs[prs.length - 1];
+    const closeOriginalFilename = `close-original-${originalPRNumber}.yml`;
+    const cleanupWorkflowFilenames = [
+      ...workflows.map((workflow) => workflow.filename),
+      closeOriginalFilename,
+    ];
+
     workflows.push({
-      filename: `close-original-${originalPRNumber}.yml`,
+      filename: closeOriginalFilename,
       content: generateCloseOriginalWorkflowYaml(
         lastPR.number,
-        originalPRNumber
+        originalPRNumber,
+        originalBaseBranch,
+        cleanupWorkflowFilenames
       ),
     });
   }

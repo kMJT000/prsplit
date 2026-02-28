@@ -10,7 +10,7 @@ Reviewing PRs with many file changes is a heavy burden for reviewers. `prsplit` 
 
 - **Layer-based splitting**: Splits PRs in order: DB -> business logic -> API -> UI
 - **Chained PRs**: Split PRs have dependencies, enabling ordered review and merge
-- **Automated workflow**: GitHub Actions monitors merges, retargets the next PR base to the original base branch, and automatically undrafts it
+- **Automated workflow**: GitHub Actions monitors merges, retargets the next PR base to the original base branch, automatically undrafts it, and cleans up generated chain workflows after completion
 - **Interactive**: If you do not like the split plan, add instructions and regenerate
 - **Exact-match assurance**: Changed files are covered exactly once across split PRs and reconstructed in chain order
 - **English output**: Generated PR titles/descriptions and CLI errors/messages are output in English
@@ -153,13 +153,14 @@ PR #3 (API)   -> merge -> retarget + undraft PR #4 (UI)
 PR #4 (UI)    -> merge -> automatically close original PR
 ```
 
-A GitHub Actions workflow is generated automatically. It detects when the previous PR is merged, updates the next PR base branch to match the original PR base branch, and undrafts the next PR. The original PR is closed only after the final split PR in the chain is merged.
+A GitHub Actions workflow is generated automatically. It detects when the previous PR is merged, updates the next PR base branch to match the original PR base branch, and undrafts the next PR. After the final split PR is merged, it closes the original PR and removes only the chain workflow files generated for that split run.
 
 ### Workflow prerequisites
 
 - GitHub Actions must be enabled on the repository.
 - The token used by `prsplit` must have permission to create branches/PRs and commit workflow files.
-- If branch protection blocks base retargeting or automation on split branches, retarget/undraft/close automation may fail.
+- Workflow jobs require `pull-requests: write` and `contents: write` to retarget PR bases, close the original PR, and delete generated workflow files.
+- If branch protection blocks base retargeting or automation on split branches, retarget/undraft/close/cleanup automation may fail.
 - If automation cannot run, you can still merge split PRs manually in order.
 
 ```mermaid

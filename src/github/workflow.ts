@@ -75,7 +75,9 @@ export function generateWorkflowYaml(options: ChainWorkflowOptions): string {
  */
 export function generateCloseOriginalWorkflowYaml(
   watchPRNumber: number,
-  originalPRNumber: number
+  originalPRNumber: number,
+  originalBaseBranch: string,
+  cleanupWorkflowFilenames: string[]
 ): string {
   const condition =
     "${{ github.event.pull_request.merged == true && github.event.pull_request.number == " +
@@ -91,7 +93,7 @@ export function generateCloseOriginalWorkflowYaml(
     "",
     "permissions:",
     "  pull-requests: write",
-    "  contents: read",
+    "  contents: write",
     "",
     "jobs:",
     "  close-original-pr:",
@@ -108,6 +110,41 @@ export function generateCloseOriginalWorkflowYaml(
     `              pull_number: ${originalPRNumber},`,
     "              state: 'closed',",
     "            });",
+    "",
+    `            const originalBaseBranch = "${originalBaseBranch}";`,
+    `            const cleanupWorkflowFilenames = ${JSON.stringify(cleanupWorkflowFilenames)};`,
+    "            console.log(",
+    "              `Cleaning up prsplit workflows for base \"${originalBaseBranch}\"...`",
+    "            );",
+    "",
+    "            for (const workflowFilename of cleanupWorkflowFilenames) {",
+    "              const workflowPath = `.github/workflows/${workflowFilename}`;",
+    "",
+    "              try {",
+    "                const { data: workflowFile } = await github.rest.repos.getContent({",
+    "                  owner: context.repo.owner,",
+    "                  repo: context.repo.repo,",
+    "                  path: workflowPath,",
+    "                });",
+    "",
+    "                if (Array.isArray(workflowFile) || !('sha' in workflowFile)) {",
+    "                  continue;",
+    "                }",
+    "",
+    "                await github.rest.repos.deleteFile({",
+    "                  owner: context.repo.owner,",
+    "                  repo: context.repo.repo,",
+    "                  path: workflowPath,",
+    "                  message: `chore: remove prsplit workflow ${workflowFilename}`,",
+    "                  sha: workflowFile.sha,",
+    "                });",
+    "              } catch (error) {",
+    "                if (error && typeof error === 'object' && 'status' in error && error.status === 404) {",
+    "                  continue;",
+    "                }",
+    "                throw error;",
+    "              }",
+    "            }",
   ].join("\n");
 }
 
