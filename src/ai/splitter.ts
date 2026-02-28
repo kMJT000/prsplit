@@ -38,7 +38,7 @@ export async function generateSplitProposal(
 
   if (chunks.length === 1) {
     // 1チャンクの場合：直接送信
-    onProgress?.("AIにdiffを送信中...");
+    onProgress?.("Sending diff to AI...");
     const userPrompt = buildSplitPrompt(
       prTitle,
       prBody,
@@ -51,13 +51,13 @@ export async function generateSplitProposal(
 
   // 複数チャンクの場合：分割送信 → 統合
   onProgress?.(
-    `diffが大きいため ${chunks.length} チャンクに分割して処理します...`
+    `Diff is large, splitting into ${chunks.length} chunks...`
   );
 
   const chunkResults: SplitProposal[] = [];
 
   for (let i = 0; i < chunks.length; i++) {
-    onProgress?.(`チャンク ${i + 1}/${chunks.length} を処理中...`);
+    onProgress?.(`Processing chunk ${i + 1}/${chunks.length}...`);
     const userPrompt = buildSplitPrompt(
       prTitle,
       prBody,
@@ -69,7 +69,7 @@ export async function generateSplitProposal(
   }
 
   // 結果の統合
-  onProgress?.("分割結果を統合中...");
+  onProgress?.("Merging split results...");
   const mergePrompt = buildMergePrompt(prTitle, prBody, chunkResults);
   const mergedResponse = await client.complete(systemPrompt, mergePrompt);
   return parseAIResponse(mergedResponse);
@@ -92,7 +92,7 @@ export function validateProposal(
   // 元のファイルがすべてカバーされているか
   for (const filename of originalFilenames) {
     if (!proposedFilenames.has(filename)) {
-      errors.push(`ファイル "${filename}" が分割案に含まれていません。`);
+      errors.push(`File "${filename}" is missing from the split proposal.`);
     }
   }
 
@@ -102,7 +102,7 @@ export function validateProposal(
     for (const filename of part.files) {
       if (seen.has(filename)) {
         errors.push(
-          `ファイル "${filename}" が重複して複数の分割PRに含まれています。`
+          `File "${filename}" appears in multiple split PRs.`
         );
       }
       seen.add(filename);
@@ -113,7 +113,7 @@ export function validateProposal(
   for (const filename of proposedFilenames) {
     if (!originalFilenames.has(filename)) {
       errors.push(
-        `ファイル "${filename}" は元PRに含まれていませんが、分割案に存在します。`
+        `File "${filename}" is in the split proposal but not in the original PR.`
       );
     }
   }
@@ -122,7 +122,7 @@ export function validateProposal(
   const orders = proposal.parts.map((p) => p.order).sort((a, b) => a - b);
   for (let i = 0; i < orders.length; i++) {
     if (orders[i] !== i + 1) {
-      errors.push(`レビュー順序が連番になっていません: ${orders.join(", ")}`);
+      errors.push(`Review order is not sequential: ${orders.join(", ")}`);
       break;
     }
   }

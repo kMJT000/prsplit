@@ -10,7 +10,6 @@ export interface PRInfo {
   body: string | null;
   head: string; // headブランチ名
   base: string; // baseブランチ名
-  diff: string;
   state: string;
   htmlUrl: string;
 }
@@ -38,21 +37,12 @@ export async function getPRInfo(
     pull_number: prNumber,
   });
 
-  // diffを取得
-  const { data: diff } = await octokit.rest.pulls.get({
-    owner,
-    repo,
-    pull_number: prNumber,
-    mediaType: { format: "diff" },
-  });
-
   return {
     number: pr.number,
     title: pr.title,
     body: pr.body,
     head: pr.head.ref,
     base: pr.base.ref,
-    diff: diff as unknown as string,
     state: pr.state,
     htmlUrl: pr.html_url,
   };
@@ -168,8 +158,9 @@ export async function deletePRs(
         pull_number: pr.number,
         state: "closed",
       });
-    } catch {
-      // ignore
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`Warning: Failed to close PR #${pr.number}. (${reason})`);
     }
 
     try {
@@ -178,8 +169,11 @@ export async function deletePRs(
         repo,
         ref: `heads/${pr.branchName}`,
       });
-    } catch {
-      // ignore
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `Warning: Failed to delete branch "${pr.branchName}". (${reason})`
+      );
     }
   }
 }

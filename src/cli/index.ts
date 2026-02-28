@@ -11,28 +11,26 @@ import { createInterface } from "readline";
 import {
   generateProposal,
   executeSplit,
-  cleanupPRs,
   type OrchestratorCallbacks,
 } from "../core/orchestrator.js";
 import type { AIModel } from "../ai/client.js";
 import type { SplitProposal } from "../ai/prompt.js";
 import type { CreatedPR } from "../github/pr.js";
-import type { DiffFile } from "../utils/diff.js";
 
 const program = new Command();
 
 program
   .name("prsplit")
-  .description("大きなPRをAIで分割してチェーンPRを作成するCLIツール")
+  .description("CLI tool to split large PRs into chained PRs with AI")
   .version("0.1.0")
-  .argument("<pr>", "PR番号 または PR URL")
-  .option("--prompt <instruction>", "追加指示（分割の方向性など）")
+  .argument("<pr>", "PR number or PR URL")
+  .option("--prompt <instruction>", "Additional split guidance")
   .option(
     "--model <model>",
-    "使用するAIモデル (claude|codex)",
+    "AI model to use (claude|codex)",
     "claude"
   )
-  .option("--dry-run", "分割案のみ表示、PR作成はしない", false)
+  .option("--dry-run", "Show split plan only; do not create PRs", false)
   .action(async (prIdentifier: string, opts: Record<string, unknown>) => {
     const model = opts.model as AIModel;
     const dryRun = opts.dryRun as boolean;
@@ -41,7 +39,7 @@ program
     // モデルのバリデーション
     if (!["claude", "codex"].includes(model)) {
       console.error(
-        chalk.red(`エラー: 無効なモデル "${model}"。claude または codex を指定してください。`)
+        chalk.red(`Error: invalid model "${model}". Use "claude" or "codex".`)
       );
       process.exit(1);
     }
@@ -59,15 +57,6 @@ async function runSplitLoop(
   additionalPrompt?: string
 ): Promise<void> {
   const spinner = ora();
-  let createdPRs: CreatedPR[] | null = null;
-  let context: {
-    owner: string;
-    repo: string;
-    prNumber: number;
-    headBranch: string;
-    baseBranch: string;
-    files: DiffFile[];
-  } | null = null;
 
   const callbacks: OrchestratorCallbacks = {
     onProgress: (msg) => {
@@ -85,7 +74,7 @@ async function runSplitLoop(
   while (true) {
     try {
       // 分割提案を生成
-      spinner.start("分割案を生成中...");
+      spinner.start("Generating split proposal...");
 
       const result = await generateProposal(
         {
@@ -101,17 +90,8 @@ async function runSplitLoop(
         process.exit(1);
       }
 
-      context = {
-        owner: result.owner,
-        repo: result.repo,
-        prNumber: result.prNumber,
-        headBranch: result.headBranch,
-        baseBranch: result.baseBranch,
-        files: result.files,
-      };
-
       spinner.succeed(
-        chalk.green(`分割案を生成しました（${result.proposal.parts.length}PR）`)
+        chalk.green(`Generated split proposal (${result.proposal.parts.length} PRs)`)
       );
 
       // 分割案を表示
@@ -119,19 +99,19 @@ async function runSplitLoop(
 
       if (dryRun) {
         console.log(
-          chalk.dim("\n--dry-run モードのためPR作成はスキップします。")
+          chalk.dim("\nSkipping PR creation because --dry-run is enabled.")
         );
         process.exit(0);
       }
 
       // ユーザーに確認
-      const confirmed = await askConfirmation("気に入りましたか？(y/n): ");
+      const confirmed = await askConfirmation("Do you want to proceed? (y/n): ");
 
       if (confirmed) {
         // PRを作成
-        spinner.start("ドラフトPRを作成中...");
+        spinner.start("Creating draft PRs...");
 
-        createdPRs = await executeSplit(
+        const createdPRs = await executeSplit(
           result.proposal,
           result.owner,
           result.repo,
@@ -142,42 +122,29 @@ async function runSplitLoop(
           callbacks
         );
 
-        spinner.succeed(chalk.green("ドラフトPRを作成しました"));
+        spinner.succeed(chalk.green("Created draft PRs"));
         displayCreatedPRs(createdPRs);
         process.exit(0);
       }
 
-      // 拒否された場合
-      if (createdPRs) {
-        spinner.start("ドラフトPRを削除中...");
-        await cleanupPRs(
-          context.owner,
-          context.repo,
-          createdPRs,
-          callbacks
-        );
-        spinner.succeed(chalk.yellow("ドラフトPRを削除しました"));
-        createdPRs = null;
-      }
-
       // 再実行の指示を取得
       additionalPrompt = await askInput(
-        "再実行の指示を入力してください: "
+        "Enter instructions to regenerate the split: "
       );
 
       if (!additionalPrompt) {
-        console.log(chalk.dim("キャンセルしました。"));
+        console.log(chalk.dim("Cancelled."));
         process.exit(0);
       }
     } catch (error) {
       spinner.stop();
       if (error instanceof Error) {
-        console.error(chalk.red(`\nエラー: ${error.message}`));
+        console.error(chalk.red(`\nError: ${error.message}`));
         if (process.env.DEBUG) {
           console.error(error.stack);
         }
       } else {
-        console.error(chalk.red("\n予期しないエラーが発生しました。"));
+        console.error(chalk.red("\nAn unexpected error occurred."));
       }
       process.exit(1);
     }
@@ -206,7 +173,7 @@ function displayProposal(proposal: SplitProposal): void {
         console.log(chalk.dim(`       - ${file}`));
       }
       console.log(
-        chalk.dim(`       ... 他 ${part.files.length - 3} ファイル`)
+        chalk.dim(`       ... and ${part.files.length - 3} more files`)
       );
     }
   }

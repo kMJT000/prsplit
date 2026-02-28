@@ -7,7 +7,6 @@ export interface PRInfo {
     body: string | null;
     head: string;
     base: string;
-    diff: string;
     state: string;
     htmlUrl: string;
 }

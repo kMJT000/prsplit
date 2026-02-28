@@ -15,8 +15,8 @@ async function createClaudeClient(): Promise<AIClient> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error(
-      "ANTHROPIC_API_KEY が設定されていません。\n" +
-        "export ANTHROPIC_API_KEY=sk-ant-xxxxx で設定してください。"
+      "ANTHROPIC_API_KEY is not set.\n" +
+        "Set it with: export ANTHROPIC_API_KEY=sk-ant-xxxxx"
     );
   }
 
@@ -34,7 +34,7 @@ async function createClaudeClient(): Promise<AIClient> {
 
       const textBlock = message.content.find((block) => block.type === "text");
       if (!textBlock || textBlock.type !== "text") {
-        throw new Error("AIからのレスポンスにテキストが含まれていません。");
+        throw new Error("AI response does not contain text content.");
       }
       return textBlock.text;
     },
@@ -48,8 +48,8 @@ async function createCodexClient(): Promise<AIClient> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error(
-      "OPENAI_API_KEY が設定されていません。\n" +
-        "export OPENAI_API_KEY=sk-xxxxx で設定してください。"
+      "OPENAI_API_KEY is not set.\n" +
+        "Set it with: export OPENAI_API_KEY=sk-xxxxx"
     );
   }
 
@@ -69,7 +69,7 @@ async function createCodexClient(): Promise<AIClient> {
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
-        throw new Error("AIからのレスポンスにテキストが含まれていません。");
+        throw new Error("AI response does not contain text content.");
       }
       return content;
     },
@@ -86,6 +86,6 @@ export async function getAIClient(model: AIModel): Promise<AIClient> {
     case "codex":
       return createCodexClient();
     default:
-      throw new Error(`未対応のモデル: ${model}`);
+      throw new Error(`Unsupported model: ${model}`);
   }
 }
