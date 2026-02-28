@@ -13,6 +13,7 @@ Reviewing PRs with many file changes is a heavy burden for reviewers. `prsplit` 
 - **Automated workflow**: GitHub Actions monitors merges, retargets the next PR base to the original base branch, automatically undrafts it, and cleans up generated chain workflows after completion
 - **Interactive**: If you do not like the split plan, add instructions and regenerate
 - **Exact-match assurance**: Changed files are covered exactly once across split PRs and reconstructed in chain order
+- **Per-branch CI gate with AI repair**: Before creating each split PR, prsplit waits for `build-and-test` (`CI` workflow on push). If it fails, AI moves minimal dependency files from later parts and retries up to 3 times
 - **English output**: Generated PR titles/descriptions and CLI errors/messages are output in English
 
 ## Installation
@@ -129,6 +130,7 @@ Before PR creation, `prsplit` validates that:
 - No file appears in multiple split PRs
 - Split PR order is sequential (`1..N`)
 - Relative `.js` imports in changed TypeScript files resolve on each generated split branch
+- `build-and-test` on each split branch passes before the PR is created (with AI-assisted repair retries up to 3 times)
 
 ### Optional manual verification
 
@@ -161,6 +163,7 @@ A GitHub Actions workflow is generated automatically. It detects when the previo
 - GitHub Actions must be enabled on the repository.
 - The token used by `prsplit` must have permission to create branches/PRs and commit workflow files.
 - Workflow jobs require `pull-requests: write` and `contents: write` to retarget PR bases, close the original PR, and delete generated workflow files.
+- A push-triggered workflow named `CI` must run `build-and-test` (for example: `npm run build` and `npm test`) because `prsplit` waits for that workflow before opening each split PR.
 - If branch protection blocks base retargeting or automation on split branches, retarget/undraft/close/cleanup automation may fail.
 - If automation cannot run, you can still merge split PRs manually in order.
 
