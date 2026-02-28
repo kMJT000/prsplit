@@ -158,7 +158,18 @@ export async function executeSplit(
       const baseSha = await getBranchSha(owner, repo, previousBranch);
 
       // ブランチを作成
-      await createBranch(owner, repo, part.branchName, baseSha);
+      const resolvedBranchName = await createBranch(
+        owner,
+        repo,
+        part.branchName,
+        baseSha
+      );
+
+      if (resolvedBranchName !== part.branchName) {
+        callbacks.onProgress(
+          `[${part.order}/${proposal.parts.length}] Branch "${part.branchName}" already exists; using "${resolvedBranchName}".`
+        );
+      }
 
       // ファイルをコミット
       const partFiles = part.files
@@ -169,7 +180,7 @@ export async function executeSplit(
         await commitFilesToBranch(
           owner,
           repo,
-          part.branchName,
+          resolvedBranchName,
           partFiles,
           part.title,
           baseSha,
@@ -197,17 +208,21 @@ export async function executeSplit(
         repo,
         `[${part.order}/${proposal.parts.length}] ${part.title}`,
         description,
-        part.branchName,
+        resolvedBranchName,
         previousBranch
       );
 
       createdPRs.push(pr);
-      previousBranch = part.branchName;
+      previousBranch = resolvedBranchName;
     }
 
     // ワークフローファイルを生成
     callbacks.onProgress("Generating GitHub Actions workflows...");
-    const workflows = generateChainWorkflows(createdPRs, originalPRNumber);
+    const workflows = generateChainWorkflows(
+      createdPRs,
+      originalPRNumber,
+      baseBranch
+    );
 
     if (workflows.length > 0) {
       // 最初の分割PRブランチにワークフローをコミット
@@ -278,7 +293,8 @@ ${rationale}
  */
 function generateChainWorkflows(
   prs: CreatedPR[],
-  originalPRNumber: number
+  originalPRNumber: number,
+  originalBaseBranch: string
 ): Array<{ filename: string; content: string }> {
   const workflows: Array<{ filename: string; content: string }> = [];
 
@@ -292,6 +308,7 @@ function generateChainWorkflows(
       content: generateWorkflowYaml({
         watchPRNumber: current.number,
         nextPRNumber: next.number,
+        originalBaseBranch,
         name: `#${current.number} → #${next.number}`,
       }),
     });
