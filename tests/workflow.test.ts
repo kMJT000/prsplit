@@ -1,0 +1,33 @@
+import { describe, expect, it } from "vitest";
+import {
+  generateCloseOriginalWorkflowYaml,
+  generateWorkflowYaml,
+} from "../src/github/workflow.js";
+
+describe("generateWorkflowYaml", () => {
+  it("次PRのbaseを元PRのbaseへ更新してからReady化する", () => {
+    const yaml = generateWorkflowYaml({
+      watchPRNumber: 10,
+      nextPRNumber: 11,
+      originalBaseBranch: "main",
+      name: "#10 -> #11",
+    });
+
+    expect(yaml).toContain("github.event.pull_request.number == 10");
+    expect(yaml).toContain('const originalBaseBranch = "main";');
+    expect(yaml).toContain("await github.rest.pulls.update({");
+    expect(yaml).toContain("pull_number: nextPRNumber,");
+    expect(yaml).toContain("base: originalBaseBranch,");
+    expect(yaml).toContain("markPullRequestReadyForReview");
+  });
+});
+
+describe("generateCloseOriginalWorkflowYaml", () => {
+  it("最終PRマージ時に元PRをcloseするyamlを生成する", () => {
+    const yaml = generateCloseOriginalWorkflowYaml(20, 5);
+
+    expect(yaml).toContain("github.event.pull_request.number == 20");
+    expect(yaml).toContain("pull_number: 5");
+    expect(yaml).toContain("state: 'closed'");
+  });
+});

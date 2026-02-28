@@ -7,6 +7,7 @@ const mockOctokit = {
       getContent: vi.fn(),
     },
     git: {
+      createRef: vi.fn(),
       createBlob: vi.fn(),
       createTree: vi.fn(),
       createCommit: vi.fn(),
@@ -19,11 +20,68 @@ vi.mock("../src/github/client.js", () => ({
   getOctokit: () => mockOctokit,
 }));
 
-import { commitFilesToBranch } from "../src/github/branch.js";
+import { commitFilesToBranch, createBranch } from "../src/github/branch.js";
+
+describe("createBranch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockOctokit.rest.git.createRef.mockResolvedValue({});
+  });
+
+  it("未使用ブランチ名ならそのまま作成する", async () => {
+    const created = await createBranch("acme", "repo", "feat/part-1", "base-sha");
+
+    expect(created).toBe("feat/part-1");
+    expect(mockOctokit.rest.git.createRef).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "repo",
+      ref: "refs/heads/feat/part-1",
+      sha: "base-sha",
+    });
+  });
+
+  it("ブランチ名が重複したら連番サフィックスで再試行する", async () => {
+    mockOctokit.rest.git.createRef
+      .mockRejectedValueOnce({
+        status: 422,
+        message: "Reference already exists",
+      })
+      .mockResolvedValueOnce({});
+
+    const created = await createBranch("acme", "repo", "feat/part-1", "base-sha");
+
+    expect(created).toBe("feat/part-1-1");
+    expect(mockOctokit.rest.git.createRef).toHaveBeenNthCalledWith(1, {
+      owner: "acme",
+      repo: "repo",
+      ref: "refs/heads/feat/part-1",
+      sha: "base-sha",
+    });
+    expect(mockOctokit.rest.git.createRef).toHaveBeenNthCalledWith(2, {
+      owner: "acme",
+      repo: "repo",
+      ref: "refs/heads/feat/part-1-1",
+      sha: "base-sha",
+    });
+  });
+
+  it("重複以外のエラーでは即失敗する", async () => {
+    mockOctokit.rest.git.createRef.mockRejectedValue({
+      status: 403,
+      message: "Forbidden",
+    });
+
+    await expect(
+      createBranch("acme", "repo", "feat/part-1", "base-sha")
+    ).rejects.toThrow('Failed to create branch "feat/part-1".');
+    expect(mockOctokit.rest.git.createRef).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("commitFilesToBranch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockOctokit.rest.git.createRef.mockResolvedValue({});
     mockOctokit.rest.git.createTree.mockResolvedValue({ data: { sha: "tree-sha" } });
     mockOctokit.rest.git.createCommit.mockResolvedValue({
       data: { sha: "commit-sha" },
