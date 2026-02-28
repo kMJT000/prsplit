@@ -51,6 +51,19 @@ deleted file mode 100644
     expect(files[0].status).toBe("removed");
   });
 
+  it("renameされたファイルで旧パスを保持する", () => {
+    const raw = `diff --git a/src/old.ts b/src/new.ts
+similarity index 100%
+rename from src/old.ts
+rename to src/new.ts`;
+
+    const files = parseDiffFiles(raw);
+    expect(files).toHaveLength(1);
+    expect(files[0].status).toBe("renamed");
+    expect(files[0].previousFilename).toBe("src/old.ts");
+    expect(files[0].filename).toBe("src/new.ts");
+  });
+
   it("空のdiffは空配列を返す", () => {
     expect(parseDiffFiles("")).toHaveLength(0);
   });
