@@ -83,6 +83,7 @@ export async function generateProposal(
     filename: f.filename,
     patch: f.patch,
     status: f.status,
+    previousFilename: f.previousFilename,
   }));
 
   callbacks.onProgress(`Detected changes in ${diffFiles.length} files.`);

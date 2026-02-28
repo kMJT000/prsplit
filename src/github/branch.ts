@@ -80,8 +80,7 @@ export async function commitFilesToBranch(
     path: string;
     mode: "100644";
     type: "blob";
-    sha?: string | null;
-    content?: string;
+    sha: string | null;
   }> = [];
 
   for (const file of files) {
@@ -93,32 +92,37 @@ export async function commitFilesToBranch(
         type: "blob",
         sha: null,
       });
-    } else {
-      // 追加・変更: diffからファイル内容を復元するのは困難なため、
-      // 元PRのheadブランチからファイル内容を取得する
-      try {
-        const { data } = await octokit.rest.repos.getContent({
-          owner,
-          repo,
-          path: file.filename,
-          ref: sourceRef,
-        });
-        if ("content" in data && data.type === "file") {
-          treeItems.push({
-            path: file.filename,
-            mode: "100644",
-            type: "blob",
-            content: Buffer.from(data.content, "base64").toString("utf-8"),
-          });
-        }
-      } catch (error) {
-        // ファイルが取得できない場合はスキップ
-        const reason = error instanceof Error ? error.message : String(error);
-        console.warn(
-          `Warning: Failed to fetch ${file.filename}; skipping. (${reason})`
+      continue;
+    }
+
+    if (file.status === "renamed") {
+      if (!file.previousFilename) {
+        throw new Error(
+          `Renamed file "${file.filename}" is missing previous filename metadata.`
         );
       }
+
+      // rename は旧パス削除 + 新パス追加として表現する
+      treeItems.push({
+        path: file.previousFilename,
+        mode: "100644",
+        type: "blob",
+        sha: null,
+      });
     }
+
+    const blobSha = await createBlobFromSourceRef(
+      owner,
+      repo,
+      file.filename,
+      sourceRef
+    );
+    treeItems.push({
+      path: file.filename,
+      mode: "100644",
+      type: "blob",
+      sha: blobSha,
+    });
   }
 
   if (treeItems.length === 0) {
@@ -151,4 +155,53 @@ export async function commitFilesToBranch(
   });
 
   return commit.sha;
+}
+
+/**
+ * sourceRef上のファイル内容をblob化し、そのSHAを返す
+ * base64のままblobを作ることでバイナリも破損させない
+ */
+async function createBlobFromSourceRef(
+  owner: string,
+  repo: string,
+  path: string,
+  sourceRef: string
+): Promise<string> {
+  const octokit = getOctokit();
+  let data: Awaited<
+    ReturnType<typeof octokit.rest.repos.getContent>
+  >["data"];
+
+  try {
+    const response = await octokit.rest.repos.getContent({
+      owner,
+      repo,
+      path,
+      ref: sourceRef,
+    });
+    data = response.data;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to fetch "${path}" from "${sourceRef}". (${reason})`);
+  }
+
+  if (!("content" in data) || data.type !== "file") {
+    throw new Error(
+      `Expected "${path}" on "${sourceRef}" to be a file content response.`
+    );
+  }
+
+  const normalizedBase64 = data.content.replace(/\n/g, "");
+  if (!normalizedBase64) {
+    throw new Error(`Received empty content for "${path}" on "${sourceRef}".`);
+  }
+
+  const { data: blob } = await octokit.rest.git.createBlob({
+    owner,
+    repo,
+    content: normalizedBase64,
+    encoding: "base64",
+  });
+
+  return blob.sha;
 }

@@ -10,6 +10,7 @@ export interface DiffFile {
   filename: string;
   patch: string;
   status: string;
+  previousFilename?: string;
 }
 
 /**
@@ -27,13 +28,19 @@ export function parseDiffFiles(rawDiff: string): DiffFile[] {
     const end = nextMatch ? nextMatch.index! : rawDiff.length;
     const patch = rawDiff.slice(start, end).trim();
 
+    const previousFilename = match[1];
     const filename = match[2];
     let status = "modified";
     if (patch.includes("new file mode")) status = "added";
     else if (patch.includes("deleted file mode")) status = "removed";
     else if (match[1] !== match[2]) status = "renamed";
 
-    files.push({ filename, patch, status });
+    files.push({
+      filename,
+      patch,
+      status,
+      ...(status === "renamed" ? { previousFilename } : {}),
+    });
   }
 
   return files;
