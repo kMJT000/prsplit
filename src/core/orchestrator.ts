@@ -207,7 +207,11 @@ export async function executeSplit(
 
     // ワークフローファイルを生成
     callbacks.onProgress("Generating GitHub Actions workflows...");
-    const workflows = generateChainWorkflows(createdPRs, originalPRNumber);
+    const workflows = generateChainWorkflows(
+      createdPRs,
+      originalPRNumber,
+      baseBranch
+    );
 
     if (workflows.length > 0) {
       // 最初の分割PRブランチにワークフローをコミット
@@ -278,7 +282,8 @@ ${rationale}
  */
 function generateChainWorkflows(
   prs: CreatedPR[],
-  originalPRNumber: number
+  originalPRNumber: number,
+  originalBaseBranch: string
 ): Array<{ filename: string; content: string }> {
   const workflows: Array<{ filename: string; content: string }> = [];
 
@@ -292,6 +297,7 @@ function generateChainWorkflows(
       content: generateWorkflowYaml({
         watchPRNumber: current.number,
         nextPRNumber: next.number,
+        originalBaseBranch,
         name: `#${current.number} → #${next.number}`,
       }),
     });

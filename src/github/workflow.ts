@@ -7,6 +7,7 @@ import { getOctokit } from "./client.js";
 export interface ChainWorkflowOptions {
   watchPRNumber: number;
   nextPRNumber: number;
+  originalBaseBranch: string;
   name: string;
 }
 
@@ -14,7 +15,7 @@ export interface ChainWorkflowOptions {
  * 指定PRのマージを検知して、次のPRをReady for reviewにするワークフローを生成する
  */
 export function generateWorkflowYaml(options: ChainWorkflowOptions): string {
-  const { watchPRNumber, nextPRNumber, name } = options;
+  const { watchPRNumber, nextPRNumber, originalBaseBranch, name } = options;
   const condition =
     "${{ github.event.pull_request.merged == true && github.event.pull_request.number == " +
     watchPRNumber +
@@ -41,6 +42,14 @@ export function generateWorkflowYaml(options: ChainWorkflowOptions): string {
     "        with:",
     "          script: |",
     `            const nextPRNumber = ${nextPRNumber};`,
+    `            const originalBaseBranch = "${originalBaseBranch}";`,
+    "            await github.rest.pulls.update({",
+    "              owner: context.repo.owner,",
+    "              repo: context.repo.repo,",
+    "              pull_number: nextPRNumber,",
+    "              base: originalBaseBranch,",
+    "            });",
+    "",
     "            const { data: nextPR } = await github.rest.pulls.get({",
     "              owner: context.repo.owner,",
     "              repo: context.repo.repo,",
