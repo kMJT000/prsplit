@@ -18,6 +18,7 @@ import {
   createBranch,
   getBranchSha,
   commitFilesToBranch,
+  validateRelativeJsImportsOnRef,
 } from "../github/branch.js";
 import {
   generateWorkflowYaml,
@@ -158,7 +159,18 @@ export async function executeSplit(
       const baseSha = await getBranchSha(owner, repo, previousBranch);
 
       // ブランチを作成
-      await createBranch(owner, repo, part.branchName, baseSha);
+      const resolvedBranchName = await createBranch(
+        owner,
+        repo,
+        part.branchName,
+        baseSha
+      );
+
+      if (resolvedBranchName !== part.branchName) {
+        callbacks.onProgress(
+          `[${part.order}/${proposal.parts.length}] Branch "${part.branchName}" already exists; using "${resolvedBranchName}".`
+        );
+      }
 
       // ファイルをコミット
       const partFiles = part.files
@@ -169,11 +181,21 @@ export async function executeSplit(
         await commitFilesToBranch(
           owner,
           repo,
-          part.branchName,
+          resolvedBranchName,
           partFiles,
           part.title,
           baseSha,
           headBranch
+        );
+
+        const precheckTargets = partFiles
+          .filter((file) => file.status !== "removed")
+          .map((file) => file.filename);
+        await validateRelativeJsImportsOnRef(
+          owner,
+          repo,
+          resolvedBranchName,
+          precheckTargets
         );
       }
 
@@ -197,17 +219,21 @@ export async function executeSplit(
         repo,
         `[${part.order}/${proposal.parts.length}] ${part.title}`,
         description,
-        part.branchName,
+        resolvedBranchName,
         previousBranch
       );
 
       createdPRs.push(pr);
-      previousBranch = part.branchName;
+      previousBranch = resolvedBranchName;
     }
 
     // ワークフローファイルを生成
     callbacks.onProgress("Generating GitHub Actions workflows...");
-    const workflows = generateChainWorkflows(createdPRs, originalPRNumber);
+    const workflows = generateChainWorkflows(
+      createdPRs,
+      originalPRNumber,
+      baseBranch
+    );
 
     if (workflows.length > 0) {
       // 最初の分割PRブランチにワークフローをコミット
@@ -278,7 +304,8 @@ ${rationale}
  */
 function generateChainWorkflows(
   prs: CreatedPR[],
-  originalPRNumber: number
+  originalPRNumber: number,
+  originalBaseBranch: string
 ): Array<{ filename: string; content: string }> {
   const workflows: Array<{ filename: string; content: string }> = [];
 
@@ -292,6 +319,7 @@ function generateChainWorkflows(
       content: generateWorkflowYaml({
         watchPRNumber: current.number,
         nextPRNumber: next.number,
+        originalBaseBranch,
         name: `#${current.number} → #${next.number}`,
       }),
     });
@@ -300,11 +328,19 @@ function generateChainWorkflows(
   // 最終PRマージ後の元PRクローズ
   if (prs.length > 0) {
     const lastPR = prs[prs.length - 1];
+    const closeOriginalFilename = `close-original-${originalPRNumber}.yml`;
+    const cleanupWorkflowFilenames = [
+      ...workflows.map((workflow) => workflow.filename),
+      closeOriginalFilename,
+    ];
+
     workflows.push({
-      filename: `close-original-${originalPRNumber}.yml`,
+      filename: closeOriginalFilename,
       content: generateCloseOriginalWorkflowYaml(
         lastPR.number,
-        originalPRNumber
+        originalPRNumber,
+        originalBaseBranch,
+        cleanupWorkflowFilenames
       ),
     });
   }
