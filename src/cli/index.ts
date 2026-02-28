@@ -30,16 +30,11 @@ program
     "AI model to use (claude|codex)",
     "claude"
   )
-  .option(
-    "--base <branch>",
-    "Override base branch for the first split PR (e.g. feature/my-target)"
-  )
   .option("--dry-run", "Show split plan only; do not create PRs", false)
   .action(async (prIdentifier: string, opts: Record<string, unknown>) => {
     const model = opts.model as AIModel;
     const dryRun = opts.dryRun as boolean;
     let additionalPrompt = opts.prompt as string | undefined;
-    const targetBaseBranch = opts.base as string | undefined;
 
     // モデルのバリデーション
     if (!["claude", "codex"].includes(model)) {
@@ -49,13 +44,7 @@ program
       process.exit(1);
     }
 
-    await runSplitLoop(
-      prIdentifier,
-      model,
-      dryRun,
-      additionalPrompt,
-      targetBaseBranch
-    );
+    await runSplitLoop(prIdentifier, model, dryRun, additionalPrompt);
   });
 
 /**
@@ -65,8 +54,7 @@ async function runSplitLoop(
   prIdentifier: string,
   model: AIModel,
   dryRun: boolean,
-  additionalPrompt?: string,
-  targetBaseBranch?: string
+  additionalPrompt?: string
 ): Promise<void> {
   const spinner = ora();
 
@@ -131,8 +119,7 @@ async function runSplitLoop(
           result.headBranch,
           result.baseBranch,
           result.files,
-          callbacks,
-          targetBaseBranch
+          callbacks
         );
 
         spinner.succeed(chalk.green("Created draft PRs"));
