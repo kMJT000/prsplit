@@ -126,6 +126,7 @@ async function runSplitLoop(
 
         spinner.succeed(chalk.green("Created draft PRs"));
         displayCreatedPRs(createdPRs);
+        displayManualChainGuidance(createdPRs, result.prNumber);
         process.exit(0);
       }
 
@@ -193,6 +194,35 @@ function displayCreatedPRs(prs: CreatedPR[]): void {
     );
     console.log(chalk.dim(`    ${pr.htmlUrl}`));
   }
+  console.log();
+}
+
+function displayManualChainGuidance(
+  prs: CreatedPR[],
+  originalPRNumber: number
+): void {
+  if (prs.length === 0) {
+    return;
+  }
+
+  console.log(chalk.yellow("Manual chain operations required:"));
+  console.log(
+    chalk.dim(`  1) Mark PR #${prs[0].number} as ready for review.`)
+  );
+
+  for (let i = 0; i < prs.length - 1; i++) {
+    console.log(
+      chalk.dim(
+        `  2) After merging PR #${prs[i].number}, mark PR #${prs[i + 1].number} as ready for review.`
+      )
+    );
+  }
+
+  console.log(
+    chalk.dim(
+      `  3) After merging the final split PR (#${prs[prs.length - 1].number}), close original PR #${originalPRNumber}.`
+    )
+  );
   console.log();
 }
 

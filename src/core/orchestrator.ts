@@ -19,11 +19,6 @@ import {
   getBranchSha,
   commitFilesToBranch,
 } from "../github/branch.js";
-import {
-  generateWorkflowYaml,
-  generateCloseOriginalWorkflowYaml,
-  commitWorkflows,
-} from "../github/workflow.js";
 
 export interface OrchestratorOptions {
   prIdentifier: string;
@@ -224,20 +219,6 @@ export async function executeSplit(
       previousBranch = part.branchName;
     }
 
-    // ワークフローファイルを生成
-    callbacks.onProgress("Generating GitHub Actions workflows...");
-    const workflows = generateChainWorkflows(createdPRs, originalPRNumber);
-
-    if (workflows.length > 0) {
-      // 最初の分割PRブランチにワークフローをコミット
-      await commitWorkflows(
-        owner,
-        repo,
-        createdPRs[0].branchName,
-        workflows
-      );
-    }
-
     return createdPRs;
   } catch (error) {
     // エラー時はすでに作成したPRとブランチをクリーンアップ
@@ -331,41 +312,3 @@ Write verification steps for reviewers.`;
   return response.trim();
 }
 
-/**
- * チェーンPR用のワークフローを生成する
- */
-function generateChainWorkflows(
-  prs: CreatedPR[],
-  originalPRNumber: number
-): Array<{ filename: string; content: string }> {
-  const workflows: Array<{ filename: string; content: string }> = [];
-
-  // チェーンPR間のワークフロー
-  for (let i = 0; i < prs.length - 1; i++) {
-    const current = prs[i];
-    const next = prs[i + 1];
-
-    workflows.push({
-      filename: `chain-${current.number}-to-${next.number}.yml`,
-      content: generateWorkflowYaml({
-        watchPRNumber: current.number,
-        nextPRNumber: next.number,
-        name: `#${current.number} → #${next.number}`,
-      }),
-    });
-  }
-
-  // 最終PRマージ後の元PRクローズ
-  if (prs.length > 0) {
-    const lastPR = prs[prs.length - 1];
-    workflows.push({
-      filename: `close-original-${originalPRNumber}.yml`,
-      content: generateCloseOriginalWorkflowYaml(
-        lastPR.number,
-        originalPRNumber
-      ),
-    });
-  }
-
-  return workflows;
-}

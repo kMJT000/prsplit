@@ -10,7 +10,7 @@ Reviewing PRs with many file changes is a heavy burden for reviewers. `prsplit` 
 
 - **Layer-based splitting**: Splits PRs in order: DB -> business logic -> API -> UI
 - **Chained PRs**: Split PRs have dependencies, enabling ordered review and merge
-- **Automated workflow**: GitHub Actions monitors merges and automatically undrafts the next PR
+- **Manual chain control**: Keep split PR file changes focused by promoting each next PR manually after merge
 - **Interactive**: If you do not like the split plan, add instructions and regenerate
 - **Exact-match guarantee**: The combined diff of all merged split PRs exactly matches the original PR
 - **English output**: Generated PR titles/descriptions and CLI errors/messages are output in English
@@ -116,28 +116,30 @@ flowchart LR
 ## Merge flow
 
 ```
-PR #1 (DB)    -> merge -> undraft PR #2 (Logic)
-PR #2 (Logic) -> merge -> undraft PR #3 (API)
-PR #3 (API)   -> merge -> automatically close original PR
+Mark PR #1 (DB) ready -> review & merge
+After PR #1 merge -> mark PR #2 (Logic) ready
+After PR #2 merge -> mark PR #3 (API) ready
+After final split PR merge -> close original PR manually
 ```
 
-A GitHub Actions workflow is generated automatically. It detects when the previous PR is merged and undrafts the next PR.
+`prsplit` intentionally does not add chain workflow files to split PRs, so file changes stay focused on product code. Chain progression is managed manually.
 
 ```mermaid
 stateDiagram-v2
   [*] --> PR1_Draft
-  PR1_Draft --> PR1_Merged: merge PR #1
-  PR1_Merged --> PR2_Ready: auto-undraft PR #2
+  PR1_Draft --> PR1_Ready: manually mark PR #1 ready
+  PR1_Ready --> PR1_Merged: merge PR #1
+  PR1_Merged --> PR2_Ready: manually mark PR #2 ready
   PR2_Ready --> PR2_Merged: merge PR #2
-  PR2_Merged --> PR3_Ready: auto-undraft PR #3
+  PR2_Merged --> PR3_Ready: manually mark PR #3 ready
   PR3_Ready --> PR3_Merged: merge PR #3
-  PR3_Merged --> OriginalPR_Closed: auto-close original PR
+  PR3_Merged --> OriginalPR_Closed: manually close original PR
   OriginalPR_Closed --> [*]
 ```
 
 ## Original PR behavior
 
-- The original PR is automatically closed after all split PRs are merged
+- Close the original PR manually after all split PRs are merged
 - The original PR branch remains (for verification)
 - Each split PR description includes the original PR branch name
 
