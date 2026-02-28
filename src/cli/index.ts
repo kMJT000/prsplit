@@ -27,7 +27,7 @@ program
   .option("--prompt <instruction>", "Additional split guidance")
   .option(
     "--model <model>",
-    "AI model to use (claude|codex)",
+    "AI model to use (claude|openai)",
     "claude"
   )
   .option("--dry-run", "Show split plan only; do not create PRs", false)
@@ -37,9 +37,9 @@ program
     let additionalPrompt = opts.prompt as string | undefined;
 
     // モデルのバリデーション
-    if (!["claude", "codex"].includes(model)) {
+    if (!["claude", "openai"].includes(model)) {
       console.error(
-        chalk.red(`Error: invalid model "${model}". Use "claude" or "codex".`)
+        chalk.red(`Error: invalid model "${model}". Use "claude" or "openai".`)
       );
       process.exit(1);
     }
@@ -116,6 +116,8 @@ async function runSplitLoop(
           result.owner,
           result.repo,
           result.prNumber,
+          result.originalPRTitle,
+          model,
           result.headBranch,
           result.baseBranch,
           result.files,
@@ -124,6 +126,7 @@ async function runSplitLoop(
 
         spinner.succeed(chalk.green("Created draft PRs"));
         displayCreatedPRs(createdPRs);
+        displayManualChainGuidance(createdPRs, result.prNumber);
         process.exit(0);
       }
 
@@ -191,6 +194,35 @@ function displayCreatedPRs(prs: CreatedPR[]): void {
     );
     console.log(chalk.dim(`    ${pr.htmlUrl}`));
   }
+  console.log();
+}
+
+function displayManualChainGuidance(
+  prs: CreatedPR[],
+  originalPRNumber: number
+): void {
+  if (prs.length === 0) {
+    return;
+  }
+
+  console.log(chalk.yellow("Manual chain operations required:"));
+  console.log(
+    chalk.dim(`  1) Mark PR #${prs[0].number} as ready for review.`)
+  );
+
+  for (let i = 0; i < prs.length - 1; i++) {
+    console.log(
+      chalk.dim(
+        `  2) After merging PR #${prs[i].number}, mark PR #${prs[i + 1].number} as ready for review.`
+      )
+    );
+  }
+
+  console.log(
+    chalk.dim(
+      `  3) After merging the final split PR (#${prs[prs.length - 1].number}), close original PR #${originalPRNumber}.`
+    )
+  );
   console.log();
 }
 
