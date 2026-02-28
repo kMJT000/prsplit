@@ -1,119 +1,141 @@
 # prsplit
 
-大きなPull Requestを、AIを使ってレビューしやすいチェーンPRに自動分割するCLIツール。
+A CLI tool that automatically splits large Pull Requests into review-friendly chained PRs using AI.
 
-## 課題
+## Problem
 
-大量のfile changesを含むPRのレビューは、レビュアーにとって大きな負担です。prsplit は既存PRのdiffをAI（Claude / Codex）で解析し、レビューしやすい単位に自動分割してドラフトPRを作成します。
+Reviewing PRs with many file changes is a heavy burden for reviewers. `prsplit` analyzes the diff of an existing PR with AI (Claude / Codex), automatically splits it into reviewable units, and creates draft PRs.
 
-## 特徴
+## Features
 
-- **レイヤー単位の分割**: DB → ビジネスロジック → API → UI の順にPRを分割
-- **チェーンPR**: 分割PRは依存関係を持ち、順序どおりにレビュー・マージ可能
-- **自動ワークフロー**: GitHub Actionsで前PRのマージを監視し、次PRのdraft自動解除
-- **インタラクティブ**: 分割案が気に入らなければ、指示を追加して再生成
-- **完全一致保証**: 全分割PRマージ後の差分が元PRと完全一致
+- **Layer-based splitting**: Splits PRs in order: DB -> business logic -> API -> UI
+- **Chained PRs**: Split PRs have dependencies, enabling ordered review and merge
+- **Automated workflow**: GitHub Actions monitors merges and automatically undrafts the next PR
+- **Interactive**: If you do not like the split plan, add instructions and regenerate
+- **Exact-match guarantee**: The combined diff of all merged split PRs exactly matches the original PR
 
-## インストール
+## Installation
 
 ```bash
 npm install -g prsplit
 ```
 
-**必要環境**: Node.js 20以上
+**Requirements**: Node.js 20+
 
-## セットアップ
+## Setup
 
-環境変数を設定してください:
+Set the following environment variables:
 
 ```bash
-# 必須
+# Required
 export GITHUB_TOKEN=ghp_xxxxx
 
-# Claude を使う場合（デフォルト）
+# If using Claude (default)
 export ANTHROPIC_API_KEY=sk-ant-xxxxx
 
-# Codex (OpenAI) を使う場合
+# If using Codex (OpenAI)
 export OPENAI_API_KEY=sk-xxxxx
 ```
 
-## 使い方
+## Usage
 
-### 基本的な使い方
+### Basic usage
 
 ```bash
-# PR番号で指定（カレントディレクトリのリポジトリを使用）
+# Specify by PR number (uses repository in current directory)
 prsplit 123
 
-# PR URLで指定
+# Specify by PR URL
 prsplit https://github.com/owner/repo/pull/123
 ```
 
-### オプション
+### Options
 
 ```bash
-prsplit <PR番号 or URL>
-  --prompt "追加指示"         # 分割の方向性を指示
-  --model claude|codex        # 使用するAIモデル（デフォルト: claude）
-  --dry-run                   # 分割案のみ表示、PR作成はしない
+prsplit <PR number or URL>
+  --prompt "additional instructions" # Guide split direction
+  --model claude|codex               # AI model to use (default: claude)
+  --dry-run                          # Show split plan only; do not create PRs
 ```
 
-### 実行例
+### Example run
 
 ```
 $ prsplit 123
-✓ 分割案を生成しました（3PR）
+✓ Generated split plan (3 PRs)
   1. feat/xxx-db-layer (4 files)
-     feat: データベースマイグレーションとモデル追加
+     feat: add database migrations and models
   2. feat/xxx-business-logic (6 files)
-     feat: ビジネスロジックの実装
+     feat: implement business logic
   3. feat/xxx-api-layer (3 files)
-     feat: APIエンドポイントの追加
+     feat: add API endpoints
 
-気に入りましたか？(y/n): n
-✓ ドラフトPRを削除しました
-再実行の指示を入力してください: ロジック層をさらに細かく分割して
-✓ 分割案を生成しました（4PR）
+Do you like this plan? (y/n): n
+✓ Deleted draft PRs
+Enter instructions for rerun: split the logic layer into smaller PRs
+✓ Generated split plan (4 PRs)
 ...
 ```
 
-### dry-runモード
+### Dry-run mode
 
 ```bash
 prsplit 123 --dry-run
-# → 分割案のみ表示。PRは作成されない。
+# -> Shows split plan only. No PRs are created.
 ```
 
-### モデルの切り替え
+### Switch model
 
 ```bash
 prsplit 123 --model codex
 ```
 
-## 分割ルール
+## Splitting rules
 
-1. **デフォルト戦略**: レイヤー単位（DB → ロジック → API → UI）
-2. **フォールバック**: レイヤー構造が不明確な場合はAIが判断
-3. **チェーン依存**: 分割PRは前PRのブランチをベースにする
-4. **完全一致**: 全PR合算 = 元PRの差分
+1. **Default strategy**: Layer-based (DB -> logic -> API -> UI)
+2. **Fallback**: If layer structure is unclear, AI decides
+3. **Chain dependency**: Each split PR is based on the previous PR branch
+4. **Exact match**: Sum of all split PR diffs = original PR diff
 
-## マージの流れ
+```mermaid
+flowchart LR
+  A[Original PR Diff] --> B[PR #1: DB Layer]
+  B --> C[PR #2: Business Logic]
+  C --> D[PR #3: API Layer]
+  D --> E[PR #4: UI Layer]
+  E --> F[Combined Diff]
+  A -. exact match .-> F
+```
+
+## Merge flow
 
 ```
-PR #1 (DB)  →  マージ  →  PR #2 (Logic) draft解除
-PR #2 (Logic)  →  マージ  →  PR #3 (API) draft解除
-PR #3 (API)  →  マージ  →  元PRを自動close
+PR #1 (DB)    -> merge -> undraft PR #2 (Logic)
+PR #2 (Logic) -> merge -> undraft PR #3 (API)
+PR #3 (API)   -> merge -> automatically close original PR
 ```
 
-GitHub Actionsワークフローが自動生成され、前PRのマージを検知して次PRのdraftを解除します。
+A GitHub Actions workflow is generated automatically. It detects when the previous PR is merged and undrafts the next PR.
 
-## 元PRの扱い
+```mermaid
+stateDiagram-v2
+  [*] --> PR1_Draft
+  PR1_Draft --> PR1_Merged: merge PR #1
+  PR1_Merged --> PR2_Ready: auto-undraft PR #2
+  PR2_Ready --> PR2_Merged: merge PR #2
+  PR2_Merged --> PR3_Ready: auto-undraft PR #3
+  PR3_Ready --> PR3_Merged: merge PR #3
+  PR3_Merged --> OriginalPR_Closed: auto-close original PR
+  OriginalPR_Closed --> [*]
+```
 
-- 全分割PRマージ後、元PRは自動でcloseされます
-- 元PRのブランチは残ります（動作確認用）
-- 各分割PRの説明文に元PRのブランチ名が記載されます
+## Original PR behavior
 
-## 開発
+- The original PR is automatically closed after all split PRs are merged
+- The original PR branch remains (for verification)
+- Each split PR description includes the original PR branch name
+
+## Development
 
 ```bash
 git clone https://github.com/prsplit/prsplit
@@ -121,14 +143,13 @@ cd prsplit
 npm install
 npm run build
 
-# 開発モードで実行
+# Run in development mode
 npm run dev -- 123
 
-# テスト
+# Run tests
 npm test
 ```
 
-## ライセンス
+## License
 
 MIT
-# prsplit
