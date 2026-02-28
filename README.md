@@ -128,6 +128,7 @@ Before PR creation, `prsplit` validates that:
 - All files from the original PR are included in the split result
 - No file appears in multiple split PRs
 - Split PR order is sequential (`1..N`)
+- Relative `.js` imports in changed TypeScript files resolve on each generated split branch
 
 ### Optional manual verification
 

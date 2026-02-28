@@ -18,6 +18,7 @@ import {
   createBranch,
   getBranchSha,
   commitFilesToBranch,
+  validateRelativeJsImportsOnRef,
 } from "../github/branch.js";
 import {
   generateWorkflowYaml,
@@ -185,6 +186,16 @@ export async function executeSplit(
           part.title,
           baseSha,
           headBranch
+        );
+
+        const precheckTargets = partFiles
+          .filter((file) => file.status !== "removed")
+          .map((file) => file.filename);
+        await validateRelativeJsImportsOnRef(
+          owner,
+          repo,
+          resolvedBranchName,
+          precheckTargets
         );
       }
 
