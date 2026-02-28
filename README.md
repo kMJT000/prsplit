@@ -68,6 +68,7 @@ prsplit https://github.com/owner/repo/pull/123
 prsplit <PR number or URL>
   --prompt "additional instructions" # Guide split direction
   --model claude|codex               # AI model to use (default: claude)
+  --base <branch>                    # Override base branch for the first split PR
   --dry-run                          # Show split plan only; do not create PRs
 ```
 
@@ -103,6 +104,15 @@ prsplit 123 --dry-run
 ```bash
 prsplit 123 --model codex
 ```
+
+### Target a non-main integration branch
+
+```bash
+# Route the split chain into a feature branch instead of main
+prsplit 123 --base feature/release-train
+```
+
+`--base` affects the first split PR. After that, each PR is still chained to the previous split branch, and the generated workflow updates/keeps the merge target automatically as the chain progresses.
 
 ## Splitting rules
 

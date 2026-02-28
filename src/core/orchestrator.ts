@@ -141,13 +141,14 @@ export async function executeSplit(
   headBranch: string,
   baseBranch: string,
   files: DiffFile[],
-  callbacks: OrchestratorCallbacks
+  callbacks: OrchestratorCallbacks,
+  targetBaseBranch?: string
 ): Promise<CreatedPR[]> {
   const createdPRs: CreatedPR[] = [];
   const fileMap = new Map(files.map((f) => [f.filename, f]));
 
   try {
-    let previousBranch = baseBranch;
+    let previousBranch = targetBaseBranch ?? baseBranch;
 
     for (const part of proposal.parts) {
       callbacks.onProgress(
