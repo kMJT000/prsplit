@@ -6,7 +6,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
 import { createInterface } from "readline";
-import { generateProposal, executeSplit, cleanupPRs, } from "../core/orchestrator.js";
+import { generateProposal, executeSplit, } from "../core/orchestrator.js";
 const program = new Command();
 program
     .name("prsplit")
@@ -32,8 +32,6 @@ program
  */
 async function runSplitLoop(prIdentifier, model, dryRun, additionalPrompt) {
     const spinner = ora();
-    let createdPRs = null;
-    let context = null;
     const callbacks = {
         onProgress: (msg) => {
             spinner.text = msg;
@@ -60,14 +58,6 @@ async function runSplitLoop(prIdentifier, model, dryRun, additionalPrompt) {
             if (!result) {
                 process.exit(1);
             }
-            context = {
-                owner: result.owner,
-                repo: result.repo,
-                prNumber: result.prNumber,
-                headBranch: result.headBranch,
-                baseBranch: result.baseBranch,
-                files: result.files,
-            };
             spinner.succeed(chalk.green(`分割案を生成しました（${result.proposal.parts.length}PR）`));
             // 分割案を表示
             displayProposal(result.proposal);
@@ -80,17 +70,10 @@ async function runSplitLoop(prIdentifier, model, dryRun, additionalPrompt) {
             if (confirmed) {
                 // PRを作成
                 spinner.start("ドラフトPRを作成中...");
-                createdPRs = await executeSplit(result.proposal, result.owner, result.repo, result.prNumber, result.headBranch, result.baseBranch, result.files, callbacks);
+                const createdPRs = await executeSplit(result.proposal, result.owner, result.repo, result.prNumber, result.headBranch, result.baseBranch, result.files, callbacks);
                 spinner.succeed(chalk.green("ドラフトPRを作成しました"));
                 displayCreatedPRs(createdPRs);
                 process.exit(0);
-            }
-            // 拒否された場合
-            if (createdPRs) {
-                spinner.start("ドラフトPRを削除中...");
-                await cleanupPRs(context.owner, context.repo, createdPRs, callbacks);
-                spinner.succeed(chalk.yellow("ドラフトPRを削除しました"));
-                createdPRs = null;
             }
             // 再実行の指示を取得
             additionalPrompt = await askInput("再実行の指示を入力してください: ");
