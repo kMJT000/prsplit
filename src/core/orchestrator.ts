@@ -106,13 +106,17 @@ export async function generateProposal(
   // 6. バリデーション
   const validation = validateProposal(proposal, diffFiles);
   if (!validation.valid) {
-    callbacks.onProgress(
-      `⚠ 分割案に問題があります:\n${validation.errors.map((e) => `  - ${e}`).join("\n")}`
+    callbacks.onError(
+      new Error(
+        `分割案の検証に失敗しました:\n${validation.errors.map((e) => `  - ${e}`).join("\n")}`
+      )
     );
+    return null;
   }
 
   // 順序でソート
   proposal.parts.sort((a, b) => a.order - b.order);
+  callbacks.onProposal(proposal);
 
   return {
     proposal,
@@ -167,7 +171,8 @@ export async function executeSplit(
           part.branchName,
           partFiles,
           part.title,
-          baseSha
+          baseSha,
+          headBranch
         );
       }
 
