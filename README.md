@@ -114,6 +114,8 @@ prsplit 123 --base feature/release-train
 
 `--base` affects the first split PR. After that, each PR is still chained to the previous split branch, and the generated workflow updates/keeps the merge target automatically as the chain progresses.
 
+If a generated split branch name already exists on the remote, `prsplit` safely keeps the existing ref and retries with an incremental suffix (for example, `feat/api-layer-1`, `feat/api-layer-2`).
+
 ## Splitting rules
 
 1. **Default strategy**: Layer-based (DB -> logic -> API -> UI)

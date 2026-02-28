@@ -13,14 +13,37 @@ export async function createBranch(
   repo: string,
   branchName: string,
   baseSha: string
-): Promise<void> {
+): Promise<string> {
   const octokit = getOctokit();
-  await octokit.rest.git.createRef({
-    owner,
-    repo,
-    ref: `refs/heads/${branchName}`,
-    sha: baseSha,
-  });
+  const maxRetry = 20;
+  let attempt = 0;
+  let candidate = branchName;
+
+  while (attempt <= maxRetry) {
+    try {
+      await octokit.rest.git.createRef({
+        owner,
+        repo,
+        ref: `refs/heads/${candidate}`,
+        sha: baseSha,
+      });
+      return candidate;
+    } catch (error) {
+      if (!isReferenceAlreadyExistsError(error)) {
+        throw error;
+      }
+
+      attempt += 1;
+      if (attempt > maxRetry) {
+        throw new Error(
+          `Failed to create a unique branch from "${branchName}" after ${maxRetry} retries.`
+        );
+      }
+      candidate = `${branchName}-${attempt}`;
+    }
+  }
+
+  throw new Error(`Failed to create branch "${branchName}".`);
 }
 
 /**
@@ -233,4 +256,17 @@ async function createBlobFromSourceRef(
   });
 
   return blob.sha;
+}
+
+function isReferenceAlreadyExistsError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const maybeError = error as { status?: unknown; message?: unknown };
+  if (maybeError.status !== 422 || typeof maybeError.message !== "string") {
+    return false;
+  }
+
+  return maybeError.message.includes("Reference already exists");
 }

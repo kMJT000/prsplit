@@ -159,7 +159,17 @@ export async function executeSplit(
       const baseSha = await getBranchSha(owner, repo, previousBranch);
 
       // ブランチを作成
-      await createBranch(owner, repo, part.branchName, baseSha);
+      const actualBranchName = await createBranch(
+        owner,
+        repo,
+        part.branchName,
+        baseSha
+      );
+      if (actualBranchName !== part.branchName) {
+        callbacks.onProgress(
+          `[${part.order}/${proposal.parts.length}] Branch "${part.branchName}" already exists, using "${actualBranchName}" instead.`
+        );
+      }
 
       // ファイルをコミット
       const partFiles = part.files
@@ -170,7 +180,7 @@ export async function executeSplit(
         await commitFilesToBranch(
           owner,
           repo,
-          part.branchName,
+          actualBranchName,
           partFiles,
           part.title,
           baseSha,
@@ -198,12 +208,12 @@ export async function executeSplit(
         repo,
         `[${part.order}/${proposal.parts.length}] ${part.title}`,
         description,
-        part.branchName,
+        actualBranchName,
         previousBranch
       );
 
       createdPRs.push(pr);
-      previousBranch = part.branchName;
+      previousBranch = actualBranchName;
     }
 
     // ワークフローファイルを生成
