@@ -62,6 +62,7 @@ export async function getPRFiles(
     patch: string;
     additions: number;
     deletions: number;
+    previousFilename?: string;
   }>
 > {
   const octokit = getOctokit();
@@ -71,6 +72,7 @@ export async function getPRFiles(
     patch: string;
     additions: number;
     deletions: number;
+    previousFilename?: string;
   }> = [];
 
   // ページネーション対応
@@ -85,6 +87,10 @@ export async function getPRFiles(
         patch: file.patch ?? "",
         additions: file.additions,
         deletions: file.deletions,
+        previousFilename:
+          typeof file.previous_filename === "string"
+            ? file.previous_filename
+            : undefined,
       });
     }
   }
