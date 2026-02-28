@@ -8,7 +8,11 @@ import type { SplitProposal } from "../ai/prompt.js";
 import type { CreatedPR } from "../github/pr.js";
 import type { DiffFile } from "../utils/diff.js";
 import { getAIClient } from "../ai/client.js";
-import { generateSplitProposal, validateProposal } from "../ai/splitter.js";
+import {
+  generateSplitProposal,
+  suggestFilesForBuildRepair,
+  validateProposal,
+} from "../ai/splitter.js";
 import {
   parsePRIdentifier,
   getRepoFromRemote,
@@ -18,7 +22,9 @@ import {
   createBranch,
   getBranchSha,
   commitFilesToBranch,
+  validateRelativeJsImportsOnRef,
 } from "../github/branch.js";
+import { waitForBuildAndTest } from "../github/actions.js";
 import {
   generateWorkflowYaml,
   generateCloseOriginalWorkflowYaml,
@@ -134,6 +140,7 @@ export async function generateProposal(
  * 分割提案をもとにPRを作成する
  */
 export async function executeSplit(
+  model: AIModel,
   proposal: SplitProposal,
   owner: string,
   repo: string,
@@ -147,9 +154,19 @@ export async function executeSplit(
   const fileMap = new Map(files.map((f) => [f.filename, f]));
 
   try {
+    const aiClient = await getAIClient(model);
     let previousBranch = baseBranch;
 
-    for (const part of proposal.parts) {
+    for (let index = 0; index < proposal.parts.length; index++) {
+      const part = proposal.parts[index];
+      const partFiles = resolvePartFiles(part.files, fileMap);
+      if (partFiles.length === 0) {
+        callbacks.onProgress(
+          `[${part.order}/${proposal.parts.length}] Skipping "${part.branchName}" because it has no files.`
+        );
+        continue;
+      }
+
       callbacks.onProgress(
         `[${part.order}/${proposal.parts.length}] Creating branch "${part.branchName}"...`
       );
@@ -158,24 +175,54 @@ export async function executeSplit(
       const baseSha = await getBranchSha(owner, repo, previousBranch);
 
       // ブランチを作成
-      await createBranch(owner, repo, part.branchName, baseSha);
+      const resolvedBranchName = await createBranch(
+        owner,
+        repo,
+        part.branchName,
+        baseSha
+      );
 
-      // ファイルをコミット
-      const partFiles = part.files
-        .map((filename) => fileMap.get(filename))
-        .filter((f): f is DiffFile => f !== undefined);
+      if (resolvedBranchName !== part.branchName) {
+        callbacks.onProgress(
+          `[${part.order}/${proposal.parts.length}] Branch "${part.branchName}" already exists; using "${resolvedBranchName}".`
+        );
+      }
 
+      // ファイルをコミット（初回）
+      let currentCommitSha = baseSha;
       if (partFiles.length > 0) {
-        await commitFilesToBranch(
+        currentCommitSha = await commitFilesToBranch(
           owner,
           repo,
-          part.branchName,
+          resolvedBranchName,
           partFiles,
           part.title,
           baseSha,
           headBranch
         );
+
+        const precheckTargets = resolvePrecheckTargets(part.files, fileMap);
+        await validateRelativeJsImportsOnRef(
+          owner,
+          repo,
+          resolvedBranchName,
+          precheckTargets
+        );
       }
+
+      // PR作成前に build-and-test を実行し、失敗時はLLMで最大3回リカバリ
+      currentCommitSha = await ensureBuildAndTestBeforePR({
+        owner,
+        repo,
+        branchName: resolvedBranchName,
+        proposal,
+        partIndex: index,
+        headBranch,
+        currentCommitSha,
+        fileMap,
+        callbacks,
+        aiClient,
+      });
 
       // PR説明文を構築
       const description = buildPRDescription(
@@ -197,17 +244,21 @@ export async function executeSplit(
         repo,
         `[${part.order}/${proposal.parts.length}] ${part.title}`,
         description,
-        part.branchName,
+        resolvedBranchName,
         previousBranch
       );
 
       createdPRs.push(pr);
-      previousBranch = part.branchName;
+      previousBranch = resolvedBranchName;
     }
 
     // ワークフローファイルを生成
     callbacks.onProgress("Generating GitHub Actions workflows...");
-    const workflows = generateChainWorkflows(createdPRs, originalPRNumber);
+    const workflows = generateChainWorkflows(
+      createdPRs,
+      originalPRNumber,
+      baseBranch
+    );
 
     if (workflows.length > 0) {
       // 最初の分割PRブランチにワークフローをコミット
@@ -227,6 +278,190 @@ export async function executeSplit(
       await deletePRs(owner, repo, createdPRs);
     }
     throw error;
+  }
+}
+
+async function ensureBuildAndTestBeforePR(params: {
+  owner: string;
+  repo: string;
+  branchName: string;
+  proposal: SplitProposal;
+  partIndex: number;
+  headBranch: string;
+  currentCommitSha: string;
+  fileMap: Map<string, DiffFile>;
+  callbacks: OrchestratorCallbacks;
+  aiClient: Awaited<ReturnType<typeof getAIClient>>;
+}): Promise<string> {
+  const maxRepairAttempts = 3;
+  const {
+    owner,
+    repo,
+    branchName,
+    proposal,
+    partIndex,
+    headBranch,
+    fileMap,
+    callbacks,
+    aiClient,
+  } = params;
+
+  const part = proposal.parts[partIndex];
+  let currentCommitSha = params.currentCommitSha;
+
+  for (let attempt = 0; attempt <= maxRepairAttempts; attempt++) {
+    callbacks.onProgress(
+      `[${part.order}/${proposal.parts.length}] Running build-and-test (${attempt + 1}/${maxRepairAttempts + 1})...`
+    );
+
+    const buildResult = await waitForBuildAndTest(owner, repo, {
+      branchName,
+      commitSha: currentCommitSha,
+      workflowName: "CI",
+    });
+
+    if (buildResult.success) {
+      callbacks.onProgress(
+        `[${part.order}/${proposal.parts.length}] build-and-test passed.`
+      );
+      return currentCommitSha;
+    }
+
+    if (attempt === maxRepairAttempts) {
+      throw new Error(
+        `[${part.order}/${proposal.parts.length}] build-and-test failed after ${maxRepairAttempts} repair attempts.\n` +
+          `${buildResult.summary}\n` +
+          `Run: ${buildResult.runUrl}`
+      );
+    }
+
+    const candidateFilesByPart = collectCandidateFilesByPart(
+      proposal,
+      partIndex,
+      fileMap
+    );
+    if (candidateFilesByPart.length === 0) {
+      throw new Error(
+        `[${part.order}/${proposal.parts.length}] build-and-test failed and no candidate files remain for AI repair.\n` +
+          `${buildResult.summary}\n` +
+          `Run: ${buildResult.runUrl}`
+      );
+    }
+
+    callbacks.onProgress(
+      `[${part.order}/${proposal.parts.length}] build-and-test failed, asking AI to repair split (${attempt + 1}/${maxRepairAttempts})...`
+    );
+
+    const suggestedFiles = await suggestFilesForBuildRepair(aiClient, {
+      failingPartOrder: part.order,
+      failingPartTitle: part.title,
+      currentPartFiles: [...part.files],
+      candidateFilesByPart,
+      failureSummary: `${buildResult.summary}\nRun: ${buildResult.runUrl}`,
+    });
+
+    const candidateSet = new Set(
+      candidateFilesByPart.flatMap((candidatePart) => candidatePart.files)
+    );
+    let filesToMove = suggestedFiles.filter((filePath) =>
+      candidateSet.has(filePath)
+    );
+
+    if (filesToMove.length === 0) {
+      // AIが空応答・不正応答を返しても進めるため、最短で次のpartを丸ごと前倒しする
+      filesToMove = [...candidateFilesByPart[0].files];
+    }
+
+    moveFilesIntoCurrentPart(proposal, partIndex, filesToMove);
+
+    const movedFiles = resolvePartFiles(filesToMove, fileMap);
+    if (movedFiles.length === 0) {
+      throw new Error(
+        `[${part.order}/${proposal.parts.length}] AI repair selected files that cannot be resolved in diff map.`
+      );
+    }
+
+    const parentSha = await getBranchSha(owner, repo, branchName);
+    currentCommitSha = await commitFilesToBranch(
+      owner,
+      repo,
+      branchName,
+      movedFiles,
+      `fix: include files for build-and-test (attempt ${attempt + 1})`,
+      parentSha,
+      headBranch
+    );
+
+    const precheckTargets = resolvePrecheckTargets(part.files, fileMap);
+    await validateRelativeJsImportsOnRef(owner, repo, branchName, precheckTargets);
+  }
+
+  return currentCommitSha;
+}
+
+function resolvePartFiles(
+  filenames: string[],
+  fileMap: Map<string, DiffFile>
+): DiffFile[] {
+  return filenames
+    .map((filename) => fileMap.get(filename))
+    .filter((file): file is DiffFile => file !== undefined);
+}
+
+function resolvePrecheckTargets(
+  filenames: string[],
+  fileMap: Map<string, DiffFile>
+): string[] {
+  return resolvePartFiles(filenames, fileMap)
+    .filter((file) => file.status !== "removed")
+    .map((file) => file.filename);
+}
+
+function collectCandidateFilesByPart(
+  proposal: SplitProposal,
+  currentPartIndex: number,
+  fileMap: Map<string, DiffFile>
+): Array<{ order: number; title: string; files: string[] }> {
+  const candidates: Array<{ order: number; title: string; files: string[] }> = [];
+
+  for (let index = currentPartIndex + 1; index < proposal.parts.length; index++) {
+    const part = proposal.parts[index];
+    const files = part.files.filter((filePath) => fileMap.has(filePath));
+    if (files.length > 0) {
+      candidates.push({
+        order: part.order,
+        title: part.title,
+        files,
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function moveFilesIntoCurrentPart(
+  proposal: SplitProposal,
+  currentPartIndex: number,
+  filesToMove: string[]
+): void {
+  const currentPart = proposal.parts[currentPartIndex];
+  const uniqueFilesToMove = Array.from(new Set(filesToMove));
+
+  for (const filePath of uniqueFilesToMove) {
+    if (!currentPart.files.includes(filePath)) {
+      currentPart.files.push(filePath);
+    }
+  }
+
+  for (
+    let targetPartIndex = currentPartIndex + 1;
+    targetPartIndex < proposal.parts.length;
+    targetPartIndex++
+  ) {
+    const targetPart = proposal.parts[targetPartIndex];
+    targetPart.files = targetPart.files.filter(
+      (filePath) => !uniqueFilesToMove.includes(filePath)
+    );
   }
 }
 
@@ -278,7 +513,8 @@ ${rationale}
  */
 function generateChainWorkflows(
   prs: CreatedPR[],
-  originalPRNumber: number
+  originalPRNumber: number,
+  originalBaseBranch: string
 ): Array<{ filename: string; content: string }> {
   const workflows: Array<{ filename: string; content: string }> = [];
 
@@ -292,6 +528,7 @@ function generateChainWorkflows(
       content: generateWorkflowYaml({
         watchPRNumber: current.number,
         nextPRNumber: next.number,
+        originalBaseBranch,
         name: `#${current.number} → #${next.number}`,
       }),
     });
@@ -300,11 +537,19 @@ function generateChainWorkflows(
   // 最終PRマージ後の元PRクローズ
   if (prs.length > 0) {
     const lastPR = prs[prs.length - 1];
+    const closeOriginalFilename = `close-original-${originalPRNumber}.yml`;
+    const cleanupWorkflowFilenames = [
+      ...workflows.map((workflow) => workflow.filename),
+      closeOriginalFilename,
+    ];
+
     workflows.push({
-      filename: `close-original-${originalPRNumber}.yml`,
+      filename: closeOriginalFilename,
       content: generateCloseOriginalWorkflowYaml(
         lastPR.number,
-        originalPRNumber
+        originalPRNumber,
+        originalBaseBranch,
+        cleanupWorkflowFilenames
       ),
     });
   }
