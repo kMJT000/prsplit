@@ -13,14 +13,52 @@ export async function createBranch(
   repo: string,
   branchName: string,
   baseSha: string
-): Promise<void> {
+): Promise<string> {
   const octokit = getOctokit();
-  await octokit.rest.git.createRef({
-    owner,
-    repo,
-    ref: `refs/heads/${branchName}`,
-    sha: baseSha,
-  });
+  const maxRetries = 20;
+
+  for (let suffix = 0; suffix <= maxRetries; suffix++) {
+    const candidateBranchName =
+      suffix === 0 ? branchName : `${branchName}-${suffix}`;
+
+    try {
+      await octokit.rest.git.createRef({
+        owner,
+        repo,
+        ref: `refs/heads/${candidateBranchName}`,
+        sha: baseSha,
+      });
+      return candidateBranchName;
+    } catch (error) {
+      if (isReferenceAlreadyExistsError(error) && suffix < maxRetries) {
+        continue;
+      }
+
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Failed to create branch "${candidateBranchName}". (${reason})`
+      );
+    }
+  }
+
+  throw new Error(
+    `Failed to create a unique branch name from "${branchName}" after ${maxRetries + 1} attempts.`
+  );
+}
+
+function isReferenceAlreadyExistsError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const status = "status" in error ? error.status : undefined;
+  const message = "message" in error ? error.message : undefined;
+
+  return (
+    status === 422 &&
+    typeof message === "string" &&
+    message.toLowerCase().includes("reference already exists")
+  );
 }
 
 /**
