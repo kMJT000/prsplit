@@ -432,6 +432,49 @@ async function ensureBuildAndTestBeforePR(params: {
       );
     }
 
+    const annotationCandidatePaths = parseFailureAnnotationCandidatePaths(
+      buildResult.summary
+    );
+    const deterministicFilesToMove = collectFilesToMoveByCandidates(
+      proposal,
+      partIndex,
+      annotationCandidatePaths
+    );
+
+    if (deterministicFilesToMove.length > 0) {
+      moveFilesIntoCurrentPart(proposal, partIndex, deterministicFilesToMove);
+      const movedFiles = resolvePartFiles(deterministicFilesToMove, fileMap);
+      if (movedFiles.length > 0) {
+        callbacks.onProgress(
+          `[${part.order}/${proposal.parts.length}] Auto-repairing build-and-test by moving failure-annotated files: ${deterministicFilesToMove.join(", ")}.`
+        );
+
+        const parentSha = await getBranchSha(owner, repo, branchName);
+        currentCommitSha = await commitFilesToBranch(
+          owner,
+          repo,
+          branchName,
+          movedFiles,
+          "fix: include files referenced by failure annotations",
+          parentSha,
+          headBranch
+        );
+
+        currentCommitSha = await ensurePrecheckResolvableWithAutoMove({
+          owner,
+          repo,
+          branchName,
+          proposal,
+          partIndex,
+          headBranch,
+          currentCommitSha,
+          fileMap,
+          callbacks,
+        });
+        continue;
+      }
+    }
+
     callbacks.onProgress(
       `[${part.order}/${proposal.parts.length}] build-and-test failed, asking AI to repair split (${attempt + 1}/${maxRepairAttempts})...`
     );
@@ -715,6 +758,21 @@ function collectFilesToMoveByCandidates(
   }
 
   return result;
+}
+
+function parseFailureAnnotationCandidatePaths(summary: string): string[] {
+  const lines = summary.split("\n");
+  const result = new Set<string>();
+
+  for (const line of lines) {
+    const match = line.match(/^\s*-\s+([^:\s][^:]*?):\d+\s+/);
+    if (!match) {
+      continue;
+    }
+    result.add(normalizeRepoPath(match[1]));
+  }
+
+  return [...result];
 }
 
 function normalizeRepoPath(candidatePath: string): string {
