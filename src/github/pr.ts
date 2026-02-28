@@ -160,7 +160,7 @@ export async function deletePRs(
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      console.warn(`警告: PR #${pr.number} のクローズに失敗しました。(${reason})`);
+      console.warn(`Warning: Failed to close PR #${pr.number}. (${reason})`);
     }
 
     try {
@@ -172,7 +172,7 @@ export async function deletePRs(
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(
-        `警告: ブランチ "${pr.branchName}" の削除に失敗しました。(${reason})`
+        `Warning: Failed to delete branch "${pr.branchName}". (${reason})`
       );
     }
   }

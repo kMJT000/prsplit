@@ -115,7 +115,7 @@ export async function commitFilesToBranch(
         // ファイルが取得できない場合はスキップ
         const reason = error instanceof Error ? error.message : String(error);
         console.warn(
-          `警告: ${file.filename} の取得に失敗しました。スキップします。(${reason})`
+          `Warning: Failed to fetch ${file.filename}; skipping. (${reason})`
         );
       }
     }

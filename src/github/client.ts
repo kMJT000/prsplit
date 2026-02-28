@@ -12,8 +12,8 @@ export function getOctokit(): Octokit {
   const token = process.env.GITHUB_TOKEN;
   if (!token) {
     throw new Error(
-      "GITHUB_TOKEN が設定されていません。\n" +
-        "export GITHUB_TOKEN=ghp_xxxxx で設定してください。"
+      "GITHUB_TOKEN is not set.\n" +
+        "Set it with: export GITHUB_TOKEN=ghp_xxxxx"
     );
   }
 
@@ -48,8 +48,8 @@ export function parsePRIdentifier(input: string): {
   }
 
   throw new Error(
-    `無効なPR指定: ${input}\n` +
-      "PR番号 または https://github.com/owner/repo/pull/123 形式で指定してください。"
+    `Invalid PR identifier: ${input}\n` +
+      "Specify a PR number or a URL like https://github.com/owner/repo/pull/123."
   );
 }
 
@@ -78,12 +78,12 @@ export async function getRepoFromRemote(): Promise<{
       return { owner: httpsMatch[1], repo: httpsMatch[2] };
     }
 
-    throw new Error("GitHub以外のリモートは対応していません。");
+    throw new Error("Only GitHub remotes are supported.");
   } catch (e: unknown) {
-    if (e instanceof Error && e.message.includes("GitHub以外")) throw e;
+    if (e instanceof Error && e.message.includes("Only GitHub remotes")) throw e;
     throw new Error(
-      "git remoteからリポジトリ情報を取得できませんでした。\n" +
-        "PR URLをフルで指定してください。"
+      "Failed to read repository information from git remote.\n" +
+        "Please pass the full PR URL."
     );
   }
 }

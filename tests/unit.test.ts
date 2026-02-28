@@ -254,7 +254,7 @@ describe("validateProposal", () => {
     );
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("重複"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("multiple split PRs"))).toBe(true);
   });
 });
 
@@ -276,7 +276,7 @@ describe("parsePRIdentifier", () => {
   });
 
   it("無効な入力でエラーを投げる", () => {
-    expect(() => parsePRIdentifier("invalid")).toThrow("無効なPR指定");
+    expect(() => parsePRIdentifier("invalid")).toThrow("Invalid PR identifier");
   });
 });
 
@@ -303,7 +303,7 @@ describe("buildSplitPrompt", () => {
       files,
       "ロジック層を細かく"
     );
-    expect(prompt).toContain("追加指示");
+    expect(prompt).toContain("Additional Instructions");
     expect(prompt).toContain("ロジック層を細かく");
   });
 });

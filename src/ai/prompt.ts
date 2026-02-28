@@ -28,32 +28,33 @@ export interface SplitPart {
  * diff分割用のシステムプロンプト
  */
 export function buildSystemPrompt(): string {
-  return `あなたはコードレビューの効率化を支援する専門家です。
-大きなPull Requestのdiffを分析し、レビューしやすい単位に分割する提案を行います。
+  return `You are an expert in optimizing pull request review workflows.
+Analyze a large pull request diff and propose a split plan into review-friendly units.
 
-## 分割ルール
-1. デフォルトの分割戦略はレイヤー単位です: DB（マイグレーション、モデル） → ビジネスロジック → API/コントローラー → UI/フロントエンド の順
-2. レイヤー構造が明確でない場合は、以下の基準でフォールバック:
-   - 機能単位（独立した機能ごと）
-   - ファイルの依存関係（依存される側を先に）
-   - 変更の種類（リファクタリング → 新機能 → テスト）
-3. 各分割PRは前のPRに依存するチェーン構造にする
-4. すべての分割PRがマージされると元PRの差分と完全一致すること
-5. 1つのファイルは1つの分割PRにのみ含まれること（ファイル単位で分割）
-6. 各PRは単独でビルドが通る状態にすること（可能な限り）
+## Splitting Rules
+1. Default strategy is layer-based: DB (migrations/models) -> business logic -> API/controllers -> UI/frontend
+2. If layer structure is unclear, fall back to:
+   - feature-based grouping (independent features)
+   - dependency order (dependencies first)
+   - change type order (refactor -> feature -> test)
+3. Make split PRs a chain where each PR depends on the previous PR
+4. Combined diffs of all split PRs must exactly match the original PR diff
+5. Each file must belong to exactly one split PR (file-level split)
+6. Each PR should be buildable on its own whenever possible
+7. All generated "title", "description", and "rationale" values must be in English, even if the input PR or instructions are in another language
 
-## 出力形式
-以下のJSON形式で出力してください。JSON以外のテキストは一切含めないでください。
+## Output Format
+Return JSON in the following format. Do not output any text outside JSON.
 
 {
   "parts": [
     {
       "order": 1,
       "branchName": "feat/xxx-db-layer",
-      "title": "feat: データベースマイグレーションとモデル追加",
-      "description": "このPRでは...",
+      "title": "feat: add database migrations and models",
+      "description": "This PR introduces...",
       "files": ["path/to/file1.ts", "path/to/file2.ts"],
-      "rationale": "DB層の変更を先にレビューすることで..."
+      "rationale": "Reviewing DB layer changes first reduces downstream ambiguity..."
     }
   ]
 }`;
@@ -71,7 +72,7 @@ export function buildSplitPrompt(
   const fileList = files
     .map(
       (f) =>
-        `- ${f.filename} (${f.status}, ${f.patch.split("\n").length}行)`
+        `- ${f.filename} (${f.status}, ${f.patch.split("\n").length} lines)`
     )
     .join("\n");
 
@@ -79,20 +80,21 @@ export function buildSplitPrompt(
     .map((f) => `=== ${f.filename} (${f.status}) ===\n${f.patch}`)
     .join("\n\n");
 
-  let prompt = `## 元PRの情報
-タイトル: ${prTitle}
-説明文: ${prBody ?? "(なし)"}
+  let prompt = `## Original PR Information
+Title: ${prTitle}
+Description: ${prBody ?? "(none)"}
 
-## 変更ファイル一覧 (${files.length}ファイル)
+## Changed Files (${files.length} files)
 ${fileList}
 
-## diff内容
+## Diff Content
 ${diffContent}
 
-上記のPRを、レビューしやすい単位に分割してください。`;
+Please split this PR into review-friendly units.
+All generated "title", "description", and "rationale" fields must be written in English.`;
 
   if (additionalInstruction) {
-    prompt += `\n\n## 追加指示\n${additionalInstruction}`;
+    prompt += `\n\n## Additional Instructions\n${additionalInstruction}`;
   }
 
   return prompt;
@@ -109,22 +111,23 @@ export function buildMergePrompt(
   const allParts = chunkResults.flatMap((r) => r.parts);
   const partsJson = JSON.stringify(allParts, null, 2);
 
-  return `## 元PRの情報
-タイトル: ${prTitle}
-説明文: ${prBody ?? "(なし)"}
+  return `## Original PR Information
+Title: ${prTitle}
+Description: ${prBody ?? "(none)"}
 
-## 各チャンクの分割結果
-以下は、大きなdiffを複数チャンクに分割してAIに送った結果です。
-これらを統合して、一貫性のある分割提案にまとめてください。
+## Split Results From Each Chunk
+The following are split results generated from multiple chunks of a large diff.
+Merge them into one consistent split proposal.
 
 ${partsJson}
 
-## 統合ルール
-1. 同じレイヤー/目的のパーツはまとめる
-2. レビュー順序を再構成する（DB → ロジック → API → UI）
-3. ブランチ名を統一的な命名にする
-4. ファイルの重複がないか確認する
-5. 各PRの説明文を適切に統合する`;
+## Merge Rules
+1. Merge parts with the same layer/purpose
+2. Rebuild review order (DB -> Logic -> API -> UI)
+3. Normalize branch naming consistently
+4. Ensure there are no duplicate files
+5. Consolidate descriptions appropriately
+6. All generated "title", "description", and "rationale" fields must be in English`;
 }
 
 /**
@@ -140,13 +143,13 @@ export function parseAIResponse(response: string): SplitProposal {
 
     // バリデーション
     if (!parsed.parts || !Array.isArray(parsed.parts)) {
-      throw new Error("AIレスポンスに 'parts' 配列が含まれていません。");
+      throw new Error("AI response does not include a 'parts' array.");
     }
 
     for (const part of parsed.parts) {
       if (!part.order || !part.branchName || !part.title || !part.files) {
         throw new Error(
-          `分割パート "${part.branchName ?? "unknown"}" に必須フィールドが不足しています。`
+          `Split part "${part.branchName ?? "unknown"}" is missing required fields.`
         );
       }
     }
@@ -155,8 +158,8 @@ export function parseAIResponse(response: string): SplitProposal {
   } catch (e: unknown) {
     if (e instanceof SyntaxError) {
       throw new Error(
-        `AIレスポンスのJSONパースに失敗しました。\n` +
-          `レスポンス (先頭500文字): ${response.slice(0, 500)}`
+        `Failed to parse JSON from AI response.\n` +
+          `Response (first 500 chars): ${response.slice(0, 500)}`
       );
     }
     throw e;
