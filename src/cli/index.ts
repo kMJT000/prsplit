@@ -11,13 +11,11 @@ import { createInterface } from "readline";
 import {
   generateProposal,
   executeSplit,
-  cleanupPRs,
   type OrchestratorCallbacks,
 } from "../core/orchestrator.js";
 import type { AIModel } from "../ai/client.js";
 import type { SplitProposal } from "../ai/prompt.js";
 import type { CreatedPR } from "../github/pr.js";
-import type { DiffFile } from "../utils/diff.js";
 
 const program = new Command();
 
@@ -59,15 +57,6 @@ async function runSplitLoop(
   additionalPrompt?: string
 ): Promise<void> {
   const spinner = ora();
-  let createdPRs: CreatedPR[] | null = null;
-  let context: {
-    owner: string;
-    repo: string;
-    prNumber: number;
-    headBranch: string;
-    baseBranch: string;
-    files: DiffFile[];
-  } | null = null;
 
   const callbacks: OrchestratorCallbacks = {
     onProgress: (msg) => {
@@ -101,15 +90,6 @@ async function runSplitLoop(
         process.exit(1);
       }
 
-      context = {
-        owner: result.owner,
-        repo: result.repo,
-        prNumber: result.prNumber,
-        headBranch: result.headBranch,
-        baseBranch: result.baseBranch,
-        files: result.files,
-      };
-
       spinner.succeed(
         chalk.green(`Generated split proposal (${result.proposal.parts.length} PRs)`)
       );
@@ -131,7 +111,7 @@ async function runSplitLoop(
         // PRを作成
         spinner.start("Creating draft PRs...");
 
-        createdPRs = await executeSplit(
+        const createdPRs = await executeSplit(
           result.proposal,
           result.owner,
           result.repo,
@@ -145,19 +125,6 @@ async function runSplitLoop(
         spinner.succeed(chalk.green("Created draft PRs"));
         displayCreatedPRs(createdPRs);
         process.exit(0);
-      }
-
-      // 拒否された場合
-      if (createdPRs) {
-        spinner.start("ドラフトPRを削除中...");
-        await cleanupPRs(
-          context.owner,
-          context.repo,
-          createdPRs,
-          callbacks
-        );
-        spinner.succeed(chalk.yellow("ドラフトPRを削除しました"));
-        createdPRs = null;
       }
 
       // 再実行の指示を取得

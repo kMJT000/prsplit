@@ -111,10 +111,12 @@ export async function generateProposal(
         `Split proposal validation failed:\n${validation.errors.map((e) => `  - ${e}`).join("\n")}`
       )
     );
+    return null;
   }
 
   // 順序でソート
   proposal.parts.sort((a, b) => a.order - b.order);
+  callbacks.onProposal(proposal);
 
   return {
     proposal,
@@ -169,7 +171,8 @@ export async function executeSplit(
           part.branchName,
           partFiles,
           part.title,
-          baseSha
+          baseSha,
+          headBranch
         );
       }
 

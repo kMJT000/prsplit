@@ -70,7 +70,8 @@ export async function commitFilesToBranch(
   branchName: string,
   files: DiffFile[],
   commitMessage: string,
-  baseSha: string
+  baseSha: string,
+  sourceRef: string
 ): Promise<string> {
   const octokit = getOctokit();
 
@@ -94,13 +95,13 @@ export async function commitFilesToBranch(
       });
     } else {
       // 追加・変更: diffからファイル内容を復元するのは困難なため、
-      // 元PRのブランチからファイル内容を取得する
+      // 元PRのheadブランチからファイル内容を取得する
       try {
         const { data } = await octokit.rest.repos.getContent({
           owner,
           repo,
           path: file.filename,
-          ref: branchName,
+          ref: sourceRef,
         });
         if ("content" in data && data.type === "file") {
           treeItems.push({

@@ -12,20 +12,12 @@ export async function getPRInfo(owner, repo, prNumber) {
         repo,
         pull_number: prNumber,
     });
-    // diffを取得
-    const { data: diff } = await octokit.rest.pulls.get({
-        owner,
-        repo,
-        pull_number: prNumber,
-        mediaType: { format: "diff" },
-    });
     return {
         number: pr.number,
         title: pr.title,
         body: pr.body,
         head: pr.head.ref,
         base: pr.base.ref,
-        diff: diff,
         state: pr.state,
         htmlUrl: pr.html_url,
     };
@@ -97,8 +89,9 @@ export async function deletePRs(owner, repo, prs) {
                 state: "closed",
             });
         }
-        catch {
-            // ignore
+        catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            console.warn(`警告: PR #${pr.number} のクローズに失敗しました。(${reason})`);
         }
         try {
             await octokit.rest.git.deleteRef({
@@ -107,8 +100,9 @@ export async function deletePRs(owner, repo, prs) {
                 ref: `heads/${pr.branchName}`,
             });
         }
-        catch {
-            // ignore
+        catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            console.warn(`警告: ブランチ "${pr.branchName}" の削除に失敗しました。(${reason})`);
         }
     }
 }

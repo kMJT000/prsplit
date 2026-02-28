@@ -50,10 +50,12 @@ export async function generateProposal(options, callbacks) {
     // 6. バリデーション
     const validation = validateProposal(proposal, diffFiles);
     if (!validation.valid) {
-        callbacks.onProgress(`⚠ 分割案に問題があります:\n${validation.errors.map((e) => `  - ${e}`).join("\n")}`);
+        callbacks.onError(new Error(`分割案の検証に失敗しました:\n${validation.errors.map((e) => `  - ${e}`).join("\n")}`));
+        return null;
     }
     // 順序でソート
     proposal.parts.sort((a, b) => a.order - b.order);
+    callbacks.onProposal(proposal);
     return {
         proposal,
         owner,
@@ -83,7 +85,7 @@ export async function executeSplit(proposal, owner, repo, originalPRNumber, head
                 .map((filename) => fileMap.get(filename))
                 .filter((f) => f !== undefined);
             if (partFiles.length > 0) {
-                await commitFilesToBranch(owner, repo, part.branchName, partFiles, part.title, baseSha);
+                await commitFilesToBranch(owner, repo, part.branchName, partFiles, part.title, baseSha, headBranch);
             }
             // PR説明文を構築
             const description = buildPRDescription(part.description, part.order, proposal.parts.length, originalPRNumber, headBranch, part.rationale);
