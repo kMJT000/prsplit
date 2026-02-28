@@ -91,6 +91,11 @@ prsplit 123 --dry-run
 prsplit 123 --model openai
 ```
 
+### Model mapping
+
+- `--model claude` -> `claude-sonnet-4-6`
+- `--model openai` -> `gpt-5.3-codex`
+
 ## Splitting rules
 
 1. **Default strategy**: Layer-based (DB -> logic -> API -> UI)
