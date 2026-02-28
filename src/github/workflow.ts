@@ -133,6 +133,11 @@ export async function commitWorkflows(
     ref: `heads/${branchName}`,
   });
   const baseSha = ref.object.sha;
+  const { data: baseCommit } = await octokit.rest.git.getCommit({
+    owner,
+    repo,
+    commit_sha: baseSha,
+  });
 
   const tree = await Promise.all(
     workflows.map(async (workflow) => {
@@ -155,7 +160,7 @@ export async function commitWorkflows(
   const { data: createdTree } = await octokit.rest.git.createTree({
     owner,
     repo,
-    base_tree: baseSha,
+    base_tree: baseCommit.tree.sha,
     tree,
   });
 

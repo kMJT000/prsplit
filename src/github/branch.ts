@@ -52,12 +52,35 @@ export async function getBranchSha(
   branch: string
 ): Promise<string> {
   const octokit = getOctokit();
-  const { data } = await octokit.rest.git.getRef({
-    owner,
-    repo,
-    ref: `heads/${branch}`,
-  });
-  return data.object.sha;
+  try {
+    const { data } = await octokit.rest.git.getRef({
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+    });
+    return data.object.sha;
+  } catch (error) {
+    const status =
+      typeof error === "object" &&
+      error !== null &&
+      "status" in error &&
+      typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
+        : undefined;
+    const reason = error instanceof Error ? error.message : String(error);
+
+    if (status === 404) {
+      throw new Error(
+        `Base branch "${branch}" was not found in ${owner}/${repo}.\n` +
+          `Create/push it first, or use an existing branch via --base.\n` +
+          `Original error: ${reason}`
+      );
+    }
+
+    throw new Error(
+      `Failed to resolve branch "${branch}" in ${owner}/${repo}. (${reason})`
+    );
+  }
 }
 
 /**
@@ -129,11 +152,17 @@ export async function commitFilesToBranch(
     return baseSha;
   }
 
+  const { data: baseCommit } = await octokit.rest.git.getCommit({
+    owner,
+    repo,
+    commit_sha: baseSha,
+  });
+
   // Treeを作成
   const { data: tree } = await octokit.rest.git.createTree({
     owner,
     repo,
-    base_tree: baseSha,
+    base_tree: baseCommit.tree.sha,
     tree: treeItems,
   });
 
