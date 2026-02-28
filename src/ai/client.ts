@@ -1,8 +1,8 @@
 /**
- * Claude/Codex切り替えクライアント
+ * Claude/OpenAI切り替えクライアント
  */
 
-export type AIModel = "claude" | "codex";
+export type AIModel = "claude" | "openai";
 
 export interface AIClient {
   complete(systemPrompt: string, userPrompt: string): Promise<string>;
@@ -26,7 +26,7 @@ async function createClaudeClient(): Promise<AIClient> {
   return {
     async complete(systemPrompt: string, userPrompt: string): Promise<string> {
       const message = await client.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 8192,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
@@ -42,9 +42,9 @@ async function createClaudeClient(): Promise<AIClient> {
 }
 
 /**
- * Codex (OpenAI) クライアント
+ * OpenAI クライアント
  */
-async function createCodexClient(): Promise<AIClient> {
+async function createOpenAIClient(): Promise<AIClient> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error(
@@ -58,16 +58,16 @@ async function createCodexClient(): Promise<AIClient> {
 
   return {
     async complete(systemPrompt: string, userPrompt: string): Promise<string> {
-      const response = await client.chat.completions.create({
-        model: "gpt-4o",
-        max_tokens: 8192,
-        messages: [
+      const response = await client.responses.create({
+        model: "gpt-5.3-codex",
+        max_output_tokens: 8192,
+        input: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
       });
 
-      const content = response.choices[0]?.message?.content;
+      const content = response.output_text;
       if (!content) {
         throw new Error("AI response does not contain text content.");
       }
@@ -83,8 +83,8 @@ export async function getAIClient(model: AIModel): Promise<AIClient> {
   switch (model) {
     case "claude":
       return createClaudeClient();
-    case "codex":
-      return createCodexClient();
+    case "openai":
+      return createOpenAIClient();
     default:
       throw new Error(`Unsupported model: ${model}`);
   }
