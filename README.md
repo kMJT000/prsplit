@@ -14,6 +14,7 @@ Reviewing PRs with many file changes is a heavy burden for reviewers. `prsplit` 
 - **Interactive**: If you do not like the split plan, add instructions and regenerate
 - **Exact-match assurance**: Changed files are covered exactly once across split PRs and reconstructed in chain order
 - **Per-branch CI gate with AI repair**: Before creating each split PR, prsplit waits for `build-and-test` (`CI` workflow on push). If it fails, AI moves minimal dependency files from later parts and retries up to 3 times
+- **Auto-collapse with final renumbering**: If CI repair makes later parts empty, prsplit collapses them and renumbers created PRs to a contiguous review order (`1/M..M/M`)
 - **English output**: Generated PR titles/descriptions and CLI errors/messages are output in English
 
 ## Installation
@@ -131,6 +132,7 @@ Before PR creation, `prsplit` validates that:
 - Split PR order is sequential (`1..N`)
 - Relative `.js` imports in changed TypeScript files resolve on each generated split branch
 - `build-and-test` on each split branch passes before the PR is created (with AI-assisted repair retries up to 3 times)
+- If CI repair moves files forward and empties a later part, that part is auto-collapsed and the final created PRs are re-labeled to contiguous order
 
 ### Optional manual verification
 
