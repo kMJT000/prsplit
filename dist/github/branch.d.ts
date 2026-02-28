@@ -18,5 +18,5 @@ export declare function getBranchSha(owner: string, repo: string, branch: string
  * ファイル変更をコミットする
  * diffの内容をTree APIで一括コミット
  */
-export declare function commitFilesToBranch(owner: string, repo: string, branchName: string, files: DiffFile[], commitMessage: string, baseSha: string): Promise<string>;
+export declare function commitFilesToBranch(owner: string, repo: string, branchName: string, files: DiffFile[], commitMessage: string, baseSha: string, sourceRef: string): Promise<string>;
 //# sourceMappingURL=branch.d.ts.map

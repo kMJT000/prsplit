@@ -70,7 +70,8 @@ export async function commitFilesToBranch(
   branchName: string,
   files: DiffFile[],
   commitMessage: string,
-  baseSha: string
+  baseSha: string,
+  sourceRef: string
 ): Promise<string> {
   const octokit = getOctokit();
 
@@ -94,13 +95,13 @@ export async function commitFilesToBranch(
       });
     } else {
       // 追加・変更: diffからファイル内容を復元するのは困難なため、
-      // 元PRのブランチからファイル内容を取得する
+      // 元PRのheadブランチからファイル内容を取得する
       try {
         const { data } = await octokit.rest.repos.getContent({
           owner,
           repo,
           path: file.filename,
-          ref: branchName,
+          ref: sourceRef,
         });
         if ("content" in data && data.type === "file") {
           treeItems.push({
@@ -110,9 +111,12 @@ export async function commitFilesToBranch(
             content: Buffer.from(data.content, "base64").toString("utf-8"),
           });
         }
-      } catch {
+      } catch (error) {
         // ファイルが取得できない場合はスキップ
-        console.warn(`警告: ${file.filename} の取得に失敗しました。スキップします。`);
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `警告: ${file.filename} の取得に失敗しました。スキップします。(${reason})`
+        );
       }
     }
   }
