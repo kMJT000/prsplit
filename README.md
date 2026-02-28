@@ -13,6 +13,7 @@ Reviewing PRs with many file changes is a heavy burden for reviewers. `prsplit` 
 - **Automated workflow**: GitHub Actions monitors merges and automatically undrafts the next PR
 - **Interactive**: If you do not like the split plan, add instructions and regenerate
 - **Exact-match guarantee**: The combined diff of all merged split PRs exactly matches the original PR
+- **English output**: Generated PR titles/descriptions and CLI errors/messages are output in English
 
 ## Installation
 

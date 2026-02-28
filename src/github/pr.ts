@@ -168,8 +168,9 @@ export async function deletePRs(
         pull_number: pr.number,
         state: "closed",
       });
-    } catch {
-      // ignore
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`Warning: Failed to close PR #${pr.number}. (${reason})`);
     }
 
     try {
@@ -178,8 +179,11 @@ export async function deletePRs(
         repo,
         ref: `heads/${pr.branchName}`,
       });
-    } catch {
-      // ignore
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `Warning: Failed to delete branch "${pr.branchName}". (${reason})`
+      );
     }
   }
 }

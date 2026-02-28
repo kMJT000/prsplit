@@ -110,9 +110,12 @@ export async function commitFilesToBranch(
             content: Buffer.from(data.content, "base64").toString("utf-8"),
           });
         }
-      } catch {
+      } catch (error) {
         // ファイルが取得できない場合はスキップ
-        console.warn(`警告: ${file.filename} の取得に失敗しました。スキップします。`);
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `Warning: Failed to fetch ${file.filename}; skipping. (${reason})`
+        );
       }
     }
   }
