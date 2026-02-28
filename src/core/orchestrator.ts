@@ -3,6 +3,7 @@
  * CLIから呼び出され、分割提案の生成 → PR作成 → ワークフロー生成を実行する
  */
 
+import path from "node:path";
 import type { AIModel } from "../ai/client.js";
 import type { SplitPart, SplitProposal } from "../ai/prompt.js";
 import type { CreatedPR } from "../github/pr.js";
@@ -210,13 +211,17 @@ export async function executeSplit(
           headBranch
         );
 
-        const precheckTargets = resolvePrecheckTargets(part.files, fileMap);
-        await validateRelativeJsImportsOnRef(
+        currentCommitSha = await ensurePrecheckResolvableWithAutoMove({
           owner,
           repo,
-          resolvedBranchName,
-          precheckTargets
-        );
+          branchName: resolvedBranchName,
+          proposal,
+          partIndex: index,
+          headBranch,
+          currentCommitSha,
+          fileMap,
+          callbacks,
+        });
       }
 
       // PR作成前に build-and-test を実行し、失敗時はLLMで最大3回リカバリ
@@ -471,8 +476,101 @@ async function ensureBuildAndTestBeforePR(params: {
       headBranch
     );
 
+    currentCommitSha = await ensurePrecheckResolvableWithAutoMove({
+      owner,
+      repo,
+      branchName,
+      proposal,
+      partIndex,
+      headBranch,
+      currentCommitSha,
+      fileMap,
+      callbacks,
+    });
+  }
+
+  return currentCommitSha;
+}
+
+async function ensurePrecheckResolvableWithAutoMove(params: {
+  owner: string;
+  repo: string;
+  branchName: string;
+  proposal: SplitProposal;
+  partIndex: number;
+  headBranch: string;
+  currentCommitSha: string;
+  fileMap: Map<string, DiffFile>;
+  callbacks: OrchestratorCallbacks;
+}): Promise<string> {
+  const maxAutoMoves = 10;
+  const {
+    owner,
+    repo,
+    branchName,
+    proposal,
+    partIndex,
+    headBranch,
+    fileMap,
+    callbacks,
+  } = params;
+
+  const part = proposal.parts[partIndex];
+  let currentCommitSha = params.currentCommitSha;
+
+  for (let movedCount = 0; movedCount <= maxAutoMoves; movedCount++) {
     const precheckTargets = resolvePrecheckTargets(part.files, fileMap);
-    await validateRelativeJsImportsOnRef(owner, repo, branchName, precheckTargets);
+
+    try {
+      await validateRelativeJsImportsOnRef(
+        owner,
+        repo,
+        branchName,
+        precheckTargets
+      );
+      return currentCommitSha;
+    } catch (error) {
+      const missingImport = parseMissingImportPrecheckError(error);
+      if (!missingImport || movedCount === maxAutoMoves) {
+        throw error;
+      }
+
+      const candidatePaths = resolveMissingImportCandidatePaths(
+        missingImport.importerPath,
+        missingImport.specifier
+      );
+      const filesToMove = collectFilesToMoveByCandidates(
+        proposal,
+        partIndex,
+        candidatePaths
+      );
+
+      if (filesToMove.length === 0) {
+        throw error;
+      }
+
+      moveFilesIntoCurrentPart(proposal, partIndex, filesToMove);
+
+      const movedFiles = resolvePartFiles(filesToMove, fileMap);
+      if (movedFiles.length === 0) {
+        throw error;
+      }
+
+      callbacks.onProgress(
+        `[${part.order}/${proposal.parts.length}] Auto-repairing precheck by moving dependency files: ${filesToMove.join(", ")}.`
+      );
+
+      const parentSha = await getBranchSha(owner, repo, branchName);
+      currentCommitSha = await commitFilesToBranch(
+        owner,
+        repo,
+        branchName,
+        movedFiles,
+        `fix: include dependency files for precheck`,
+        parentSha,
+        headBranch
+      );
+    }
   }
 
   return currentCommitSha;
@@ -542,6 +640,85 @@ function moveFilesIntoCurrentPart(
       (filePath) => !uniqueFilesToMove.includes(filePath)
     );
   }
+}
+
+function parseMissingImportPrecheckError(error: unknown): {
+  importerPath: string;
+  specifier: string;
+} | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const match = error.message.match(
+    /Build precheck failed: "([^"]+)" imports "([^"]+)", but no matching source file exists on "[^"]+"\./
+  );
+  if (!match) {
+    return null;
+  }
+
+  return {
+    importerPath: match[1],
+    specifier: match[2],
+  };
+}
+
+function resolveMissingImportCandidatePaths(
+  importerPath: string,
+  specifier: string
+): string[] {
+  if (!specifier.startsWith(".") || !specifier.endsWith(".js")) {
+    return [];
+  }
+
+  const basePath = normalizeRepoPath(
+    path.posix.join(path.posix.dirname(importerPath), specifier)
+  );
+  const tsPath = basePath.replace(/\.js$/, ".ts");
+
+  return [
+    tsPath,
+    tsPath.replace(/\.ts$/, ".tsx"),
+    tsPath.replace(/\.ts$/, "/index.ts"),
+    tsPath.replace(/\.ts$/, "/index.tsx"),
+  ];
+}
+
+function collectFilesToMoveByCandidates(
+  proposal: SplitProposal,
+  currentPartIndex: number,
+  candidatePaths: string[]
+): string[] {
+  if (candidatePaths.length === 0) {
+    return [];
+  }
+
+  const currentPart = proposal.parts[currentPartIndex];
+  const currentPartSet = new Set(currentPart.files);
+  const candidateSet = new Set(candidatePaths);
+  const result: string[] = [];
+
+  for (
+    let targetPartIndex = currentPartIndex + 1;
+    targetPartIndex < proposal.parts.length;
+    targetPartIndex++
+  ) {
+    const part = proposal.parts[targetPartIndex];
+    for (const filePath of part.files) {
+      if (currentPartSet.has(filePath)) {
+        continue;
+      }
+      if (candidateSet.has(filePath) && !result.includes(filePath)) {
+        result.push(filePath);
+      }
+    }
+  }
+
+  return result;
+}
+
+function normalizeRepoPath(candidatePath: string): string {
+  return path.posix.normalize(candidatePath).replace(/^\.?\//, "");
 }
 
 /**

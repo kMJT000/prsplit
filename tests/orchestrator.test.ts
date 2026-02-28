@@ -231,4 +231,110 @@ describe("executeSplit", () => {
       expect.any(Array)
     );
   });
+
+  it("precheckで不足依存が見つかったら候補partから自動前倒しして継続する", async () => {
+    const proposal: SplitProposal = {
+      parts: [
+        {
+          order: 1,
+          branchName: "feat/part-1",
+          title: "feat: part 1",
+          description: "part 1 description",
+          files: ["a.ts"],
+          rationale: "rationale 1",
+        },
+        {
+          order: 2,
+          branchName: "feat/part-2",
+          title: "feat: part 2",
+          description: "part 2 description",
+          files: ["src/core/orchestrator.ts", "src/github/actions.ts"],
+          rationale: "rationale 2",
+        },
+      ],
+    };
+
+    const files: DiffFile[] = [
+      { filename: "a.ts", patch: "", status: "modified" },
+      { filename: "src/core/orchestrator.ts", patch: "", status: "modified" },
+      { filename: "src/github/actions.ts", patch: "", status: "modified" },
+    ];
+
+    mocks.getBranchSha.mockResolvedValue("sha-main");
+    mocks.commitFilesToBranch
+      .mockResolvedValueOnce("sha-part-1-initial")
+      .mockResolvedValueOnce("sha-part-1-repair")
+      .mockResolvedValueOnce("sha-part-1-precheck-auto-move");
+
+    mocks.waitForBuildAndTest
+      .mockResolvedValueOnce({
+        success: false,
+        summary: "build failed",
+        runUrl: "https://example.com/run/1",
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        summary: "ok",
+        runUrl: "https://example.com/run/2",
+      });
+
+    mocks.suggestFilesForBuildRepair.mockResolvedValue([
+      "src/core/orchestrator.ts",
+    ]);
+
+    mocks.validateRelativeJsImportsOnRef
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new Error(
+          'Build precheck failed: "src/core/orchestrator.ts" imports "../github/actions.js", but no matching source file exists on "feat/part-1".'
+        )
+      )
+      .mockResolvedValueOnce(undefined);
+
+    mocks.createDraftPR.mockResolvedValueOnce({
+      number: 110,
+      title: "[1/2] feat: part 1",
+      htmlUrl: "https://example.com/pr/110",
+      branchName: "feat/part-1",
+    });
+
+    const progressMessages: string[] = [];
+    const created = await executeSplit(
+      "claude",
+      proposal,
+      "acme",
+      "repo",
+      20,
+      "feature/original",
+      "main",
+      files,
+      {
+        onProgress: (message) => {
+          progressMessages.push(message);
+        },
+        onProposal: vi.fn(),
+        onPRCreated: vi.fn(),
+        onError: vi.fn(),
+      }
+    );
+
+    expect(created).toHaveLength(1);
+    expect(created[0].title).toBe("[1/1] feat: part 1");
+    expect(mocks.commitFilesToBranch).toHaveBeenCalledTimes(3);
+    expect(mocks.commitFilesToBranch).toHaveBeenNthCalledWith(
+      3,
+      "acme",
+      "repo",
+      "feat/part-1",
+      [expect.objectContaining({ filename: "src/github/actions.ts" })],
+      "fix: include dependency files for precheck",
+      "sha-main",
+      "feature/original"
+    );
+    expect(
+      progressMessages.some((message) =>
+        message.includes("Auto-repairing precheck by moving dependency files")
+      )
+    ).toBe(true);
+  });
 });
