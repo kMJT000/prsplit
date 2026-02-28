@@ -55,7 +55,7 @@ prsplit https://github.com/owner/repo/pull/123
 ```bash
 prsplit <PR number or URL>
   --prompt "additional instructions" # Guide split direction
-  --model claude|codex               # AI model to use (default: claude)
+  --model claude|openai              # AI model to use (default: claude)
   --dry-run                          # Show split plan only; do not create PRs
 ```
 
@@ -88,8 +88,13 @@ prsplit 123 --dry-run
 ### Switch model
 
 ```bash
-prsplit 123 --model codex
+prsplit 123 --model openai
 ```
+
+### Model mapping
+
+- `--model claude` -> `claude-sonnet-4-6`
+- `--model openai` -> `gpt-5.3-codex`
 
 ## Splitting rules
 
