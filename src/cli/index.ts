@@ -27,7 +27,7 @@ program
   .option("--prompt <instruction>", "Additional split guidance")
   .option(
     "--model <model>",
-    "AI model to use (claude|codex)",
+    "AI model to use (claude|openai)",
     "claude"
   )
   .option("--dry-run", "Show split plan only; do not create PRs", false)
@@ -37,9 +37,9 @@ program
     let additionalPrompt = opts.prompt as string | undefined;
 
     // モデルのバリデーション
-    if (!["claude", "codex"].includes(model)) {
+    if (!["claude", "openai"].includes(model)) {
       console.error(
-        chalk.red(`Error: invalid model "${model}". Use "claude" or "codex".`)
+        chalk.red(`Error: invalid model "${model}". Use "claude" or "openai".`)
       );
       process.exit(1);
     }

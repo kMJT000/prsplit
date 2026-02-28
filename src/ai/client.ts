@@ -1,8 +1,8 @@
 /**
- * Claude/Codex切り替えクライアント
+ * Claude/OpenAI切り替えクライアント
  */
 
-export type AIModel = "claude" | "codex";
+export type AIModel = "claude" | "openai";
 
 export interface AIClient {
   complete(systemPrompt: string, userPrompt: string): Promise<string>;
@@ -42,9 +42,9 @@ async function createClaudeClient(): Promise<AIClient> {
 }
 
 /**
- * Codex (OpenAI) クライアント
+ * OpenAI クライアント
  */
-async function createCodexClient(): Promise<AIClient> {
+async function createOpenAIClient(): Promise<AIClient> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error(
@@ -83,8 +83,8 @@ export async function getAIClient(model: AIModel): Promise<AIClient> {
   switch (model) {
     case "claude":
       return createClaudeClient();
-    case "codex":
-      return createCodexClient();
+    case "openai":
+      return createOpenAIClient();
     default:
       throw new Error(`Unsupported model: ${model}`);
   }
