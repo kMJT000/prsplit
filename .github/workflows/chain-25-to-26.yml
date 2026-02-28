@@ -1,0 +1,45 @@
+name: prsplit chain #25 → #26
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  undraft-next-pr:
+    if: ${{ github.event.pull_request.merged == true && github.event.pull_request.number == 25 }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark next PR ready for review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const nextPRNumber = 26;
+            const originalBaseBranch = "main";
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: nextPRNumber,
+              base: originalBaseBranch,
+            });
+
+            const { data: nextPR } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: nextPRNumber,
+            });
+
+            await github.graphql(
+              `mutation($pullRequestId: ID!) {
+                markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+                  pullRequest {
+                    number
+                    isDraft
+                  }
+                }
+              }`,
+              { pullRequestId: nextPR.node_id }
+            );

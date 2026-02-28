@@ -1,0 +1,25 @@
+name: prsplit close original #20
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  close-original-pr:
+    if: ${{ github.event.pull_request.merged == true && github.event.pull_request.number == 29 }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close original PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: 20,
+              state: 'closed',
+            });
