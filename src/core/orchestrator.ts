@@ -22,7 +22,7 @@ import {
   getPRInfo,
   getPRFiles,
   createDraftPR,
-  deletePRs,
+  closePRs,
   updatePRMetadata,
 } from "../github/pr.js";
 import {
@@ -313,7 +313,7 @@ export async function executeSplit(
     // エラー時はすでに作成したPRとブランチをクリーンアップ
     if (createdPRs.length > 0) {
       callbacks.onProgress("Error occurred; cleaning up created PRs...");
-      await deletePRs(owner, repo, createdPRs);
+      await closePRs(owner, repo, createdPRs);
     }
     throw error;
   }
@@ -788,8 +788,8 @@ export async function cleanupPRs(
   prs: CreatedPR[],
   callbacks: OrchestratorCallbacks
 ): Promise<void> {
-  callbacks.onProgress("Deleting draft PRs...");
-  await deletePRs(owner, repo, prs);
+  callbacks.onProgress("Closing draft PRs...");
+  await closePRs(owner, repo, prs);
 }
 
 /**

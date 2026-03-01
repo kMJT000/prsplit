@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   validateRelativeJsImportsOnRef: vi.fn(),
   waitForBuildAndTest: vi.fn(),
   createDraftPR: vi.fn(),
-  deletePRs: vi.fn(),
+  closePRs: vi.fn(),
   updatePRMetadata: vi.fn(),
   commitWorkflows: vi.fn(),
   generateWorkflowYaml: vi.fn(),
@@ -43,7 +43,7 @@ vi.mock("../src/github/pr.js", () => ({
   getPRInfo: vi.fn(),
   getPRFiles: vi.fn(),
   createDraftPR: mocks.createDraftPR,
-  deletePRs: mocks.deletePRs,
+  closePRs: mocks.closePRs,
   updatePRMetadata: mocks.updatePRMetadata,
 }));
 
@@ -65,7 +65,7 @@ describe("executeSplit", () => {
     );
     mocks.commitFilesToBranch.mockResolvedValue("commit-sha");
     mocks.validateRelativeJsImportsOnRef.mockResolvedValue(undefined);
-    mocks.deletePRs.mockResolvedValue(undefined);
+    mocks.closePRs.mockResolvedValue(undefined);
     mocks.commitWorkflows.mockResolvedValue(undefined);
     mocks.generateWorkflowYaml.mockReturnValue("chain-workflow");
     mocks.generateCloseOriginalWorkflowYaml.mockReturnValue("close-workflow");
