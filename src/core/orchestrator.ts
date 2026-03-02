@@ -297,6 +297,8 @@ function buildPRDescription(
 ### Workflow cleanup
 - This PR includes generated workflow files under \`.github/workflows/\`.
 - \`.github/workflows/chain-~-to-~.yml\` is automatically deleted after merge by the cleanup workflow.
+- When the previous split PR is merged, the chain workflow updates the next PR base branch to the original PR base branch and syncs the next PR branch with the latest base diff.
+- This automation only runs on merge (\`merged == true\`), not when a PR is simply closed.
 `
     : "";
 
