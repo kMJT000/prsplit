@@ -21,6 +21,18 @@ export interface SplitOptions {
   additionalInstruction?: string;
 }
 
+export interface BuildRepairOptions {
+  failingPartOrder: number;
+  failingPartTitle: string;
+  currentPartFiles: string[];
+  candidateFilesByPart: Array<{
+    order: number;
+    title: string;
+    files: string[];
+  }>;
+  failureSummary: string;
+}
+
 /**
  * AIを使ってPRの分割提案を生成する
  * diffが大きい場合は自動でチャンク分割して複数回AIに投げ、結果を統合する
@@ -128,4 +140,75 @@ export function validateProposal(
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * build-and-test 失敗時に、後続PRから前倒しすべきファイルをAIに提案させる
+ */
+export async function suggestFilesForBuildRepair(
+  client: AIClient,
+  options: BuildRepairOptions
+): Promise<string[]> {
+  const systemPrompt = `You are an expert at fixing split pull-request chains.
+Your task is to choose the MINIMUM set of files to move from later split PR parts into the current failing part so that build-and-test can pass.
+
+Rules:
+1. Only choose files that exist in candidate parts.
+2. Keep the move minimal and dependency-focused.
+3. Prefer moving foundational files (types, utilities, interfaces, services) before tests.
+4. Return JSON only. No markdown, no explanation.
+
+Output JSON schema:
+{
+  "filesToMove": ["path/to/file.ts"]
+}`;
+
+  const userPrompt = [
+    `Current failing part: #${options.failingPartOrder} ${options.failingPartTitle}`,
+    "",
+    "Files already in current part:",
+    ...options.currentPartFiles.map((filePath) => `- ${filePath}`),
+    "",
+    "Candidate files from later parts:",
+    ...options.candidateFilesByPart.flatMap((part) => [
+      `Part #${part.order} ${part.title}`,
+      ...part.files.map((filePath) => `- ${filePath}`),
+    ]),
+    "",
+    "Failure summary:",
+    options.failureSummary,
+    "",
+    "Return JSON only.",
+  ].join("\n");
+
+  const response = await client.complete(systemPrompt, userPrompt);
+  const parsed = parseJsonObject(response);
+  const filesToMove = readStringArray(parsed, "filesToMove");
+  return Array.from(new Set(filesToMove));
+}
+
+function parseJsonObject(response: string): Record<string, unknown> {
+  const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const jsonStr = jsonMatch ? jsonMatch[1].trim() : response.trim();
+  const parsed = JSON.parse(jsonStr);
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("AI build repair response must be a JSON object.");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function readStringArray(
+  parsed: Record<string, unknown>,
+  key: string
+): string[] {
+  const value = parsed[key];
+  if (!Array.isArray(value)) {
+    throw new Error(`AI build repair response must include "${key}" array.`);
+  }
+  const nonString = value.find((item) => typeof item !== "string");
+  if (nonString !== undefined) {
+    throw new Error(`AI build repair response "${key}" must contain strings.`);
+  }
+  return value as string[];
 }
