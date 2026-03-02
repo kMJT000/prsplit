@@ -15,21 +15,28 @@ import {
 } from "../core/orchestrator.js";
 import type { AIModel } from "../ai/client.js";
 import type { SplitProposal } from "../ai/prompt.js";
-import type { CreatedPR } from "../github/pr.js";
+import {
+  closePRs,
+  findDraftSplitPRsByOriginalPR,
+  type CreatedPR,
+} from "../github/pr.js";
+import {
+  getRepoFromRemote,
+  parsePRIdentifier,
+} from "../github/client.js";
 
 const program = new Command();
 
 program
   .name("prsplit")
   .description("CLI tool to split large PRs into chained PRs with AI")
-  .version("0.1.0")
-  .argument("<pr>", "PR number or PR URL")
+  .version("0.1.0");
+
+program
+  .command("split <pr>", { isDefault: true })
+  .description("Split the target PR into chained draft PRs")
   .option("--prompt <instruction>", "Additional split guidance")
-  .option(
-    "--model <model>",
-    "AI model to use (claude|codex)",
-    "claude"
-  )
+  .option("--model <model>", "AI model to use (claude|codex)", "claude")
   .option("--dry-run", "Show split plan only; do not create PRs", false)
   .action(async (prIdentifier: string, opts: Record<string, unknown>) => {
     const model = opts.model as AIModel;
@@ -45,6 +52,25 @@ program
     }
 
     await runSplitLoop(prIdentifier, model, dryRun, additionalPrompt);
+  });
+
+program
+  .command("cleanup <pr>")
+  .description("Close draft split PRs generated from the specified original PR")
+  .action(async (prIdentifier: string) => {
+    try {
+      await runCleanup(prIdentifier);
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error(chalk.red(`\nError: ${error.message}`));
+        if (process.env.DEBUG) {
+          console.error(error.stack);
+        }
+      } else {
+        console.error(chalk.red("\nAn unexpected error occurred."));
+      }
+      process.exit(1);
+    }
   });
 
 /**
@@ -151,6 +177,46 @@ async function runSplitLoop(
   }
 }
 
+async function runCleanup(prIdentifier: string): Promise<void> {
+  const spinner = ora();
+  spinner.start("Resolving repository and PR info...");
+
+  const parsed = parsePRIdentifier(prIdentifier);
+  let { owner, repo, number: originalPRNumber } = parsed;
+
+  if (!owner || !repo) {
+    const remote = await getRepoFromRemote();
+    owner = remote.owner;
+    repo = remote.repo;
+  }
+
+  spinner.text = `Searching draft split PRs from original PR #${originalPRNumber}...`;
+  const targets = await findDraftSplitPRsByOriginalPR(owner, repo, originalPRNumber);
+  spinner.stop();
+
+  if (targets.length === 0) {
+    console.log(
+      chalk.dim(
+        `No prsplit draft PRs found for original PR #${originalPRNumber}.`
+      )
+    );
+    return;
+  }
+
+  displayCleanupTargets(targets);
+  const confirmed = await askConfirmation(
+    `Close ${targets.length} draft PR(s) and delete their branches? (y/n): `
+  );
+  if (!confirmed) {
+    console.log(chalk.dim("Cancelled."));
+    return;
+  }
+
+  spinner.start("Closing draft PRs...");
+  await closePRs(owner, repo, targets);
+  spinner.succeed(chalk.green(`Closed ${targets.length} draft PR(s).`));
+}
+
 /**
  * 分割提案を表示する
  */
@@ -189,6 +255,16 @@ function displayCreatedPRs(prs: CreatedPR[]): void {
     console.log(
       `  ${chalk.green("✓")} #${pr.number} ${pr.title}`
     );
+    console.log(chalk.dim(`    ${pr.htmlUrl}`));
+  }
+  console.log();
+}
+
+function displayCleanupTargets(prs: CreatedPR[]): void {
+  console.log();
+  console.log(chalk.yellow("Draft PRs to close:"));
+  for (const pr of prs) {
+    console.log(`  #${pr.number} ${pr.title}`);
     console.log(chalk.dim(`    ${pr.htmlUrl}`));
   }
   console.log();
