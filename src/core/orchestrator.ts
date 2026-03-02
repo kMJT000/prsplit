@@ -27,7 +27,6 @@ import {
 } from "../github/pr.js";
 import {
   createBranch,
-  deleteBranch,
   getBranchSha,
   commitFilesToBranch,
   validateRelativeJsImportsOnRef,
@@ -51,36 +50,6 @@ export interface OrchestratorCallbacks {
   onProposal: (proposal: SplitProposal) => void;
   onPRCreated: (prs: CreatedPR[]) => void;
   onError: (error: Error) => void;
-}
-
-export type ProposalAdjustmentReason =
-  | "build_failure_annotations"
-  | "ai_repair"
-  | "precheck_dependency"
-  | "empty_after_repair";
-
-export interface ProposalAdjustment {
-  kind: "file_move" | "part_collapse";
-  reason: ProposalAdjustmentReason;
-  toPartOrder?: number;
-  fromPartOrders?: number[];
-  files?: string[];
-  collapsedPartOrder?: number;
-  collapsedBranchName?: string;
-}
-
-export interface ExecuteSplitOptions {
-  onAdjustedProposalConfirm?: (
-    adjustedProposal: SplitProposal,
-    adjustments: ProposalAdjustment[]
-  ) => Promise<boolean>;
-}
-
-export class SplitExecutionAbortedError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SplitExecutionAbortedError";
-  }
 }
 
 /**
@@ -186,19 +155,12 @@ export async function executeSplit(
   headBranch: string,
   baseBranch: string,
   files: DiffFile[],
-  callbacks: OrchestratorCallbacks,
-  options: ExecuteSplitOptions = {}
+  callbacks: OrchestratorCallbacks
 ): Promise<CreatedPR[]> {
   const createdPRs: CreatedPR[] = [];
   const createdEntries: Array<{ pr: CreatedPR; part: SplitPart }> = [];
-  const createdBranchNames: string[] = [];
   const collapsedParts: SplitPart[] = [];
-  const adjustments: ProposalAdjustment[] = [];
-  let acknowledgedAdjustmentCount = 0;
   const fileMap = new Map(files.map((f) => [f.filename, f]));
-  const recordAdjustment = (adjustment: ProposalAdjustment): void => {
-    adjustments.push(adjustment);
-  };
 
   try {
     const aiClient = await getAIClient(model);
@@ -209,12 +171,6 @@ export async function executeSplit(
       const partFiles = resolvePartFiles(part.files, fileMap);
       if (partFiles.length === 0) {
         collapsedParts.push(part);
-        recordAdjustment({
-          kind: "part_collapse",
-          reason: "empty_after_repair",
-          collapsedPartOrder: part.order,
-          collapsedBranchName: part.branchName,
-        });
         callbacks.onProgress(
           `[${part.order}/${proposal.parts.length}] Auto-collapsed "${part.branchName}" because it has no files after repair.`
         );
@@ -241,7 +197,6 @@ export async function executeSplit(
           `[${part.order}/${proposal.parts.length}] Branch "${part.branchName}" already exists; using "${resolvedBranchName}".`
         );
       }
-      createdBranchNames.push(resolvedBranchName);
 
       // ファイルをコミット（初回）
       let currentCommitSha = baseSha;
@@ -266,7 +221,6 @@ export async function executeSplit(
           currentCommitSha,
           fileMap,
           callbacks,
-          recordAdjustment,
         });
       }
 
@@ -282,32 +236,7 @@ export async function executeSplit(
         fileMap,
         callbacks,
         aiClient,
-        recordAdjustment,
       });
-
-      if (
-        options.onAdjustedProposalConfirm &&
-        adjustments.length > acknowledgedAdjustmentCount
-      ) {
-        const pendingAdjustments = adjustments.slice(acknowledgedAdjustmentCount);
-        const adjustedProposal = buildEffectiveProposalSnapshot(proposal, fileMap);
-
-        callbacks.onProgress(
-          `Split plan changed after CI/precheck repair. Review adjusted proposal (${adjustedProposal.parts.length} PRs)...`
-        );
-
-        const confirmed = await options.onAdjustedProposalConfirm(
-          adjustedProposal,
-          pendingAdjustments
-        );
-        acknowledgedAdjustmentCount = adjustments.length;
-
-        if (!confirmed) {
-          throw new SplitExecutionAbortedError(
-            "Operation cancelled by user after reviewing the adjusted split proposal."
-          );
-        }
-      }
 
       // PR説明文を構築
       const description = buildPRDescription(
@@ -386,16 +315,6 @@ export async function executeSplit(
       callbacks.onProgress("Error occurred; cleaning up created PRs...");
       await closePRs(owner, repo, createdPRs);
     }
-    const createdPRBranchSet = new Set(createdPRs.map((pr) => pr.branchName));
-    const temporaryBranches = createdBranchNames.filter(
-      (branchName) => !createdPRBranchSet.has(branchName)
-    );
-    if (temporaryBranches.length > 0) {
-      callbacks.onProgress("Cleaning up temporary branches...");
-      for (const branchName of temporaryBranches) {
-        await deleteBranch(owner, repo, branchName);
-      }
-    }
     throw error;
   }
 }
@@ -457,7 +376,6 @@ async function ensureBuildAndTestBeforePR(params: {
   fileMap: Map<string, DiffFile>;
   callbacks: OrchestratorCallbacks;
   aiClient: Awaited<ReturnType<typeof getAIClient>>;
-  recordAdjustment: (adjustment: ProposalAdjustment) => void;
 }): Promise<string> {
   const maxRepairAttempts = 3;
   const {
@@ -470,7 +388,6 @@ async function ensureBuildAndTestBeforePR(params: {
     fileMap,
     callbacks,
     aiClient,
-    recordAdjustment,
   } = params;
 
   const part = proposal.parts[partIndex];
@@ -525,22 +442,11 @@ async function ensureBuildAndTestBeforePR(params: {
     );
 
     if (deterministicFilesToMove.length > 0) {
-      const moveResult = moveFilesIntoCurrentPart(
-        proposal,
-        partIndex,
-        deterministicFilesToMove
-      );
-      const movedFiles = resolvePartFiles(moveResult.movedFiles, fileMap);
+      moveFilesIntoCurrentPart(proposal, partIndex, deterministicFilesToMove);
+      const movedFiles = resolvePartFiles(deterministicFilesToMove, fileMap);
       if (movedFiles.length > 0) {
-        recordAdjustment({
-          kind: "file_move",
-          reason: "build_failure_annotations",
-          toPartOrder: part.order,
-          fromPartOrders: moveResult.fromPartOrders,
-          files: moveResult.movedFiles,
-        });
         callbacks.onProgress(
-          `[${part.order}/${proposal.parts.length}] Auto-repairing build-and-test by moving failure-annotated files: ${moveResult.movedFiles.join(", ")}.`
+          `[${part.order}/${proposal.parts.length}] Auto-repairing build-and-test by moving failure-annotated files: ${deterministicFilesToMove.join(", ")}.`
         );
 
         const parentSha = await getBranchSha(owner, repo, branchName);
@@ -564,7 +470,6 @@ async function ensureBuildAndTestBeforePR(params: {
           currentCommitSha,
           fileMap,
           callbacks,
-            recordAdjustment,
         });
         continue;
       }
@@ -590,37 +495,18 @@ async function ensureBuildAndTestBeforePR(params: {
     );
 
     if (filesToMove.length === 0) {
-      filesToMove = selectBalancedFallbackFiles(candidateFilesByPart, attempt);
-      if (filesToMove.length > 0) {
-        callbacks.onProgress(
-          `[${part.order}/${proposal.parts.length}] AI repair returned no valid file set; applying balanced fallback with ${filesToMove.length} file(s).`
-        );
-      }
+      // AIが空応答・不正応答を返しても進めるため、最短で次のpartを丸ごと前倒しする
+      filesToMove = [...candidateFilesByPart[0].files];
     }
 
-    if (filesToMove.length === 0) {
-      throw new Error(
-        `[${part.order}/${proposal.parts.length}] build-and-test failed and AI repair returned no movable files.\n` +
-          `${buildResult.summary}\n` +
-          `Run: ${buildResult.runUrl}`
-      );
-    }
+    moveFilesIntoCurrentPart(proposal, partIndex, filesToMove);
 
-    const moveResult = moveFilesIntoCurrentPart(proposal, partIndex, filesToMove);
-
-    const movedFiles = resolvePartFiles(moveResult.movedFiles, fileMap);
+    const movedFiles = resolvePartFiles(filesToMove, fileMap);
     if (movedFiles.length === 0) {
       throw new Error(
         `[${part.order}/${proposal.parts.length}] AI repair selected files that cannot be resolved in diff map.`
       );
     }
-    recordAdjustment({
-      kind: "file_move",
-      reason: "ai_repair",
-      toPartOrder: part.order,
-      fromPartOrders: moveResult.fromPartOrders,
-      files: moveResult.movedFiles,
-    });
 
     const parentSha = await getBranchSha(owner, repo, branchName);
     currentCommitSha = await commitFilesToBranch(
@@ -643,7 +529,6 @@ async function ensureBuildAndTestBeforePR(params: {
       currentCommitSha,
       fileMap,
       callbacks,
-      recordAdjustment,
     });
   }
 
@@ -660,7 +545,6 @@ async function ensurePrecheckResolvableWithAutoMove(params: {
   currentCommitSha: string;
   fileMap: Map<string, DiffFile>;
   callbacks: OrchestratorCallbacks;
-  recordAdjustment: (adjustment: ProposalAdjustment) => void;
 }): Promise<string> {
   const maxAutoMoves = 10;
   const {
@@ -672,7 +556,6 @@ async function ensurePrecheckResolvableWithAutoMove(params: {
     headBranch,
     fileMap,
     callbacks,
-    recordAdjustment,
   } = params;
 
   const part = proposal.parts[partIndex];
@@ -709,26 +592,15 @@ async function ensurePrecheckResolvableWithAutoMove(params: {
         throw error;
       }
 
-      const moveResult = moveFilesIntoCurrentPart(
-        proposal,
-        partIndex,
-        filesToMove
-      );
+      moveFilesIntoCurrentPart(proposal, partIndex, filesToMove);
 
-      const movedFiles = resolvePartFiles(moveResult.movedFiles, fileMap);
+      const movedFiles = resolvePartFiles(filesToMove, fileMap);
       if (movedFiles.length === 0) {
         throw error;
       }
-      recordAdjustment({
-        kind: "file_move",
-        reason: "precheck_dependency",
-        toPartOrder: part.order,
-        fromPartOrders: moveResult.fromPartOrders,
-        files: moveResult.movedFiles,
-      });
 
       callbacks.onProgress(
-        `[${part.order}/${proposal.parts.length}] Auto-repairing precheck by moving dependency files: ${moveResult.movedFiles.join(", ")}.`
+        `[${part.order}/${proposal.parts.length}] Auto-repairing precheck by moving dependency files: ${filesToMove.join(", ")}.`
       );
 
       const parentSha = await getBranchSha(owner, repo, branchName);
@@ -791,12 +663,15 @@ function moveFilesIntoCurrentPart(
   proposal: SplitProposal,
   currentPartIndex: number,
   filesToMove: string[]
-): { movedFiles: string[]; fromPartOrders: number[] } {
+): void {
   const currentPart = proposal.parts[currentPartIndex];
   const uniqueFilesToMove = Array.from(new Set(filesToMove));
-  const filesToMoveSet = new Set(uniqueFilesToMove);
-  const movedFiles = new Set<string>();
-  const fromPartOrders = new Set<number>();
+
+  for (const filePath of uniqueFilesToMove) {
+    if (!currentPart.files.includes(filePath)) {
+      currentPart.files.push(filePath);
+    }
+  }
 
   for (
     let targetPartIndex = currentPartIndex + 1;
@@ -804,28 +679,10 @@ function moveFilesIntoCurrentPart(
     targetPartIndex++
   ) {
     const targetPart = proposal.parts[targetPartIndex];
-    const remainingFiles: string[] = [];
-    for (const filePath of targetPart.files) {
-      if (filesToMoveSet.has(filePath)) {
-        movedFiles.add(filePath);
-        fromPartOrders.add(targetPart.order);
-      } else {
-        remainingFiles.push(filePath);
-      }
-    }
-    targetPart.files = remainingFiles;
+    targetPart.files = targetPart.files.filter(
+      (filePath) => !uniqueFilesToMove.includes(filePath)
+    );
   }
-
-  for (const filePath of movedFiles) {
-    if (!currentPart.files.includes(filePath)) {
-      currentPart.files.push(filePath);
-    }
-  }
-
-  return {
-    movedFiles: [...movedFiles],
-    fromPartOrders: [...fromPartOrders].sort((a, b) => a - b),
-  };
 }
 
 function parseMissingImportPrecheckError(error: unknown): {
@@ -920,48 +777,6 @@ function parseFailureAnnotationCandidatePaths(summary: string): string[] {
 
 function normalizeRepoPath(candidatePath: string): string {
   return path.posix.normalize(candidatePath).replace(/^\.?\//, "");
-}
-
-function selectBalancedFallbackFiles(
-  candidateFilesByPart: Array<{ order: number; title: string; files: string[] }>,
-  attempt: number
-): string[] {
-  if (candidateFilesByPart.length === 0) {
-    return [];
-  }
-  const firstCandidatePartFiles = candidateFilesByPart[0].files;
-  if (firstCandidatePartFiles.length === 0) {
-    return [];
-  }
-
-  if (attempt <= 0) {
-    return [firstCandidatePartFiles[0]];
-  }
-  if (attempt === 1) {
-    return firstCandidatePartFiles.slice(0, Math.min(2, firstCandidatePartFiles.length));
-  }
-  return [...firstCandidatePartFiles];
-}
-
-function buildEffectiveProposalSnapshot(
-  proposal: SplitProposal,
-  fileMap: Map<string, DiffFile>
-): SplitProposal {
-  const effectiveParts: SplitPart[] = [];
-
-  for (const part of proposal.parts) {
-    const effectiveFiles = part.files.filter((filePath) => fileMap.has(filePath));
-    if (effectiveFiles.length === 0) {
-      continue;
-    }
-    effectiveParts.push({
-      ...part,
-      order: effectiveParts.length + 1,
-      files: [...effectiveFiles],
-    });
-  }
-
-  return { parts: effectiveParts };
 }
 
 /**

@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   suggestFilesForBuildRepair: vi.fn(),
   getBranchSha: vi.fn(),
   createBranch: vi.fn(),
-  deleteBranch: vi.fn(),
   commitFilesToBranch: vi.fn(),
   validateRelativeJsImportsOnRef: vi.fn(),
   waitForBuildAndTest: vi.fn(),
@@ -32,7 +31,6 @@ vi.mock("../src/ai/splitter.js", () => ({
 vi.mock("../src/github/branch.js", () => ({
   getBranchSha: mocks.getBranchSha,
   createBranch: mocks.createBranch,
-  deleteBranch: mocks.deleteBranch,
   commitFilesToBranch: mocks.commitFilesToBranch,
   validateRelativeJsImportsOnRef: mocks.validateRelativeJsImportsOnRef,
 }));
@@ -55,10 +53,7 @@ vi.mock("../src/github/workflow.js", () => ({
   commitWorkflows: mocks.commitWorkflows,
 }));
 
-import {
-  executeSplit,
-  SplitExecutionAbortedError,
-} from "../src/core/orchestrator.js";
+import { executeSplit } from "../src/core/orchestrator.js";
 
 describe("executeSplit", () => {
   beforeEach(() => {
@@ -68,7 +63,6 @@ describe("executeSplit", () => {
     mocks.createBranch.mockImplementation(
       async (_owner: string, _repo: string, branchName: string) => branchName
     );
-    mocks.deleteBranch.mockResolvedValue(undefined);
     mocks.commitFilesToBranch.mockResolvedValue("commit-sha");
     mocks.validateRelativeJsImportsOnRef.mockResolvedValue(undefined);
     mocks.closePRs.mockResolvedValue(undefined);
@@ -434,80 +428,5 @@ describe("executeSplit", () => {
         message.includes("Auto-repairing build-and-test by moving failure-annotated files")
       )
     ).toBe(true);
-  });
-
-  it("調整済みプランの再確認で中断された場合は作成途中ブランチを削除する", async () => {
-    const proposal: SplitProposal = {
-      parts: [
-        {
-          order: 1,
-          branchName: "feat/part-1",
-          title: "feat: part 1",
-          description: "part 1 description",
-          files: ["a.ts"],
-          rationale: "rationale 1",
-        },
-        {
-          order: 2,
-          branchName: "feat/part-2",
-          title: "feat: part 2",
-          description: "part 2 description",
-          files: ["b.ts"],
-          rationale: "rationale 2",
-        },
-      ],
-    };
-
-    const files: DiffFile[] = [
-      { filename: "a.ts", patch: "", status: "modified" },
-      { filename: "b.ts", patch: "", status: "modified" },
-    ];
-
-    mocks.getBranchSha.mockResolvedValue("sha-main");
-    mocks.commitFilesToBranch
-      .mockResolvedValueOnce("sha-part-1-initial")
-      .mockResolvedValueOnce("sha-part-1-repair");
-    mocks.validateRelativeJsImportsOnRef.mockResolvedValue(undefined);
-    mocks.waitForBuildAndTest
-      .mockResolvedValueOnce({
-        success: false,
-        summary: "build failed",
-        runUrl: "https://example.com/run/1",
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        summary: "ok",
-        runUrl: "https://example.com/run/2",
-      });
-    mocks.suggestFilesForBuildRepair.mockResolvedValue(["b.ts"]);
-
-    const onAdjustedProposalConfirm = vi.fn(async () => false);
-
-    await expect(
-      executeSplit(
-        "claude",
-        proposal,
-        "acme",
-        "repo",
-        20,
-        "feature/original",
-        "main",
-        files,
-        {
-          onProgress: vi.fn(),
-          onProposal: vi.fn(),
-          onPRCreated: vi.fn(),
-          onError: vi.fn(),
-        },
-        {
-          onAdjustedProposalConfirm,
-        }
-      )
-    ).rejects.toBeInstanceOf(SplitExecutionAbortedError);
-
-    expect(onAdjustedProposalConfirm).toHaveBeenCalledTimes(1);
-    expect(mocks.createDraftPR).not.toHaveBeenCalled();
-    expect(mocks.closePRs).not.toHaveBeenCalled();
-    expect(mocks.deleteBranch).toHaveBeenCalledWith("acme", "repo", "feat/part-1");
   });
 });
