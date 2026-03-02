@@ -133,26 +133,6 @@ export async function createDraftPR(
 }
 
 /**
- * 既存PRのタイトル/本文を更新する
- */
-export async function updatePRMetadata(
-  owner: string,
-  repo: string,
-  prNumber: number,
-  title: string,
-  body: string
-): Promise<void> {
-  const octokit = getOctokit();
-  await octokit.rest.pulls.update({
-    owner,
-    repo,
-    pull_number: prNumber,
-    title,
-    body,
-  });
-}
-
-/**
  * PRをcloseする
  */
 export async function closePR(
