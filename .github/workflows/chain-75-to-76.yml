@@ -1,0 +1,63 @@
+name: prsplit chain #75 → #76
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  undraft-next-pr:
+    if: ${{ github.event.pull_request.merged == true && github.event.pull_request.number == 75 }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark next PR ready for review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const nextPRNumber = 76;
+            const originalBaseBranch = "main";
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: nextPRNumber,
+              base: originalBaseBranch,
+            });
+
+            const { data: nextPR } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: nextPRNumber,
+            });
+
+            try {
+              await github.rest.pulls.updateBranch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: nextPRNumber,
+                expected_head_sha: nextPR.head.sha,
+              });
+            } catch (error) {
+              const canIgnore =
+                error &&
+                typeof error === "object" &&
+                "status" in error &&
+                error.status === 422;
+              if (!canIgnore) {
+                throw error;
+              }
+            }
+
+            await github.graphql(
+              `mutation($pullRequestId: ID!) {
+                markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+                  pullRequest {
+                    number
+                    isDraft
+                  }
+                }
+              }`,
+              { pullRequestId: nextPR.node_id }
+            );
