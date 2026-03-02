@@ -11,7 +11,9 @@ import { createInterface } from "readline";
 import {
   generateProposal,
   executeSplit,
+  SplitExecutionAbortedError,
   type OrchestratorCallbacks,
+  type ProposalAdjustment,
 } from "../core/orchestrator.js";
 import type { AIModel } from "../ai/client.js";
 import type { SplitProposal } from "../ai/prompt.js";
@@ -146,7 +148,16 @@ async function runSplitLoop(
           result.headBranch,
           result.baseBranch,
           result.files,
-          callbacks
+          callbacks,
+          {
+            onAdjustedProposalConfirm: async (adjustedProposal, adjustments) => {
+              spinner.stop();
+              displayAdjustedProposal(adjustedProposal, adjustments);
+              return askConfirmation(
+                "Adjusted split plan detected after CI/precheck repair. Continue? (y/n): "
+              );
+            },
+          }
         );
 
         spinner.succeed(chalk.green("Created draft PRs"));
@@ -165,6 +176,10 @@ async function runSplitLoop(
       }
     } catch (error) {
       spinner.stop();
+      if (error instanceof SplitExecutionAbortedError) {
+        console.log(chalk.dim("Cancelled."));
+        process.exit(0);
+      }
       if (error instanceof Error) {
         console.error(chalk.red(`\nError: ${error.message}`));
         if (process.env.DEBUG) {
@@ -269,6 +284,52 @@ function displayCleanupTargets(prs: CreatedPR[]): void {
     console.log(chalk.dim(`    ${pr.htmlUrl}`));
   }
   console.log();
+}
+
+function displayAdjustedProposal(
+  proposal: SplitProposal,
+  adjustments: ProposalAdjustment[]
+): void {
+  console.log();
+  console.log(chalk.yellow("Split plan was adjusted during CI/precheck repair:"));
+  for (const adjustment of adjustments) {
+    if (adjustment.kind === "file_move") {
+      const fromLabel =
+        adjustment.fromPartOrders && adjustment.fromPartOrders.length > 0
+          ? ` from part(s) ${adjustment.fromPartOrders.join(", ")}`
+          : "";
+      const filesLabel =
+        adjustment.files && adjustment.files.length > 0
+          ? `${adjustment.files.join(", ")}`
+          : "(no file details)";
+      console.log(
+        chalk.dim(
+          `  - Moved file(s)${fromLabel} to part #${adjustment.toPartOrder ?? "?"} (${formatAdjustmentReason(adjustment.reason)}): ${filesLabel}`
+        )
+      );
+      continue;
+    }
+
+    console.log(
+      chalk.dim(
+        `  - Collapsed part #${adjustment.collapsedPartOrder ?? "?"} "${adjustment.collapsedBranchName ?? "unknown"}" (${formatAdjustmentReason(adjustment.reason)}).`
+      )
+    );
+  }
+  displayProposal(proposal);
+}
+
+function formatAdjustmentReason(reason: ProposalAdjustment["reason"]): string {
+  if (reason === "build_failure_annotations") {
+    return "build failure annotations";
+  }
+  if (reason === "precheck_dependency") {
+    return "missing dependency precheck";
+  }
+  if (reason === "empty_after_repair") {
+    return "no remaining files";
+  }
+  return "AI repair";
 }
 
 /**
