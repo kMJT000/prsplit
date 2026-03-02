@@ -66,7 +66,7 @@ function isReferenceAlreadyExistsError(error: unknown): boolean {
  * 指定ref上で、変更対象TSファイルの相対.js import が解決できるか検証する
  * PR作成前に、分割順やブランチ基準の不整合を早期検出するために使う
  */
-export async function validateRelativeJsImportsOnRef(
+async function validateRelativeJsImportsOnRefImpl(
   owner: string,
   repo: string,
   ref: string,
@@ -183,6 +183,8 @@ export async function validateRelativeJsImportsOnRef(
     return false;
   }
 }
+
+export const validateRelativeJsImportsOnRef = validateRelativeJsImportsOnRefImpl;
 
 function extractRelativeImportSpecifiers(content: string): string[] {
   const specifiers: string[] = [];
@@ -383,3 +385,4 @@ async function createBlobFromSourceRef(
 
   return blob.sha;
 }
+
