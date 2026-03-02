@@ -8,6 +8,11 @@ import {
 import { parseAIResponse, buildSplitPrompt } from "../src/ai/prompt.js";
 import { validateProposal } from "../src/ai/splitter.js";
 import { parsePRIdentifier } from "../src/github/client.js";
+import { isDirectExecution } from "../src/cli/index.js";
+import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 describe("parseDiffFiles", () => {
   it("複数ファイルのdiffをパースする", () => {
@@ -318,5 +323,22 @@ describe("buildSplitPrompt", () => {
     );
     expect(prompt).toContain("Additional Instructions");
     expect(prompt).toContain("ロジック層を細かく");
+  });
+});
+
+describe("isDirectExecution", () => {
+  it("argv1 が未指定なら false", () => {
+    expect(isDirectExecution(undefined)).toBe(false);
+  });
+
+  it("symlink 経由で同一ファイルを指す場合は true", () => {
+    const dir = mkdtempSync(join(tmpdir(), "prsplit-"));
+    const realEntry = join(dir, "entry.js");
+    const linkedEntry = join(dir, "linked-entry.js");
+    writeFileSync(realEntry, "console.log('ok');");
+    symlinkSync(realEntry, linkedEntry);
+
+    const moduleUrl = pathToFileURL(realEntry).href;
+    expect(isDirectExecution(linkedEntry, moduleUrl)).toBe(true);
   });
 });
