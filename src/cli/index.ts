@@ -8,7 +8,8 @@ import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
 import { createInterface } from "readline";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import {
   generateProposal,
   executeSplit,
@@ -316,6 +317,18 @@ function askInput(prompt: string): Promise<string> {
   });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+export function isDirectExecution(
+  argv1: string | undefined,
+  moduleUrl: string = import.meta.url
+): boolean {
+  if (!argv1) return false;
+  try {
+    return realpathSync(argv1) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectExecution(process.argv[1])) {
   program.parse();
 }
