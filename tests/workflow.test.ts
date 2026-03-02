@@ -5,7 +5,7 @@ import {
 } from "../src/github/workflow.js";
 
 describe("generateWorkflowYaml", () => {
-  it("次PRのbaseを元PRのbaseへ更新してからReady化する", () => {
+  it("次PRのbaseを元PRのbaseへ更新し、最新差分を取り込んでからReady化する", () => {
     const yaml = generateWorkflowYaml({
       watchPRNumber: 10,
       nextPRNumber: 11,
@@ -18,6 +18,9 @@ describe("generateWorkflowYaml", () => {
     expect(yaml).toContain("await github.rest.pulls.update({");
     expect(yaml).toContain("pull_number: nextPRNumber,");
     expect(yaml).toContain("base: originalBaseBranch,");
+    expect(yaml).toContain("await github.rest.pulls.updateBranch({");
+    expect(yaml).toContain("expected_head_sha: nextPR.head.sha,");
+    expect(yaml).toContain("error.status === 422");
     expect(yaml).toContain("markPullRequestReadyForReview");
   });
 });
