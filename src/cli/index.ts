@@ -142,6 +142,7 @@ async function runSplitLoop(
           result.owner,
           result.repo,
           result.prNumber,
+          result.originalPRTitle,
           result.headBranch,
           result.baseBranch,
           result.files,
