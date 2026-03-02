@@ -11,25 +11,34 @@ import { createInterface } from "readline";
 import {
   generateProposal,
   executeSplit,
+  SplitExecutionAbortedError,
   type OrchestratorCallbacks,
+  type ProposalAdjustment,
 } from "../core/orchestrator.js";
 import type { AIModel } from "../ai/client.js";
 import type { SplitProposal } from "../ai/prompt.js";
-import type { CreatedPR } from "../github/pr.js";
+import {
+  closePRs,
+  findDraftSplitPRsByOriginalPR,
+  type CreatedPR,
+} from "../github/pr.js";
+import {
+  getRepoFromRemote,
+  parsePRIdentifier,
+} from "../github/client.js";
 
 const program = new Command();
 
 program
   .name("prsplit")
   .description("CLI tool to split large PRs into chained PRs with AI")
-  .version("0.1.0")
-  .argument("<pr>", "PR number or PR URL")
+  .version("0.1.0");
+
+program
+  .command("split <pr>", { isDefault: true })
+  .description("Split the target PR into chained draft PRs")
   .option("--prompt <instruction>", "Additional split guidance")
-  .option(
-    "--model <model>",
-    "AI model to use (claude|codex)",
-    "claude"
-  )
+  .option("--model <model>", "AI model to use (claude|codex)", "claude")
   .option("--dry-run", "Show split plan only; do not create PRs", false)
   .action(async (prIdentifier: string, opts: Record<string, unknown>) => {
     const model = opts.model as AIModel;
@@ -45,6 +54,25 @@ program
     }
 
     await runSplitLoop(prIdentifier, model, dryRun, additionalPrompt);
+  });
+
+program
+  .command("cleanup <pr>")
+  .description("Close draft split PRs generated from the specified original PR")
+  .action(async (prIdentifier: string) => {
+    try {
+      await runCleanup(prIdentifier);
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error(chalk.red(`\nError: ${error.message}`));
+        if (process.env.DEBUG) {
+          console.error(error.stack);
+        }
+      } else {
+        console.error(chalk.red("\nAn unexpected error occurred."));
+      }
+      process.exit(1);
+    }
   });
 
 /**
@@ -112,6 +140,7 @@ async function runSplitLoop(
         spinner.start("Creating draft PRs...");
 
         const createdPRs = await executeSplit(
+          model,
           result.proposal,
           result.owner,
           result.repo,
@@ -119,7 +148,16 @@ async function runSplitLoop(
           result.headBranch,
           result.baseBranch,
           result.files,
-          callbacks
+          callbacks,
+          {
+            onAdjustedProposalConfirm: async (adjustedProposal, adjustments) => {
+              spinner.stop();
+              displayAdjustedProposal(adjustedProposal, adjustments);
+              return askConfirmation(
+                "Adjusted split plan detected after CI/precheck repair. Continue? (y/n): "
+              );
+            },
+          }
         );
 
         spinner.succeed(chalk.green("Created draft PRs"));
@@ -138,6 +176,10 @@ async function runSplitLoop(
       }
     } catch (error) {
       spinner.stop();
+      if (error instanceof SplitExecutionAbortedError) {
+        console.log(chalk.dim("Cancelled."));
+        process.exit(0);
+      }
       if (error instanceof Error) {
         console.error(chalk.red(`\nError: ${error.message}`));
         if (process.env.DEBUG) {
@@ -149,6 +191,46 @@ async function runSplitLoop(
       process.exit(1);
     }
   }
+}
+
+async function runCleanup(prIdentifier: string): Promise<void> {
+  const spinner = ora();
+  spinner.start("Resolving repository and PR info...");
+
+  const parsed = parsePRIdentifier(prIdentifier);
+  let { owner, repo, number: originalPRNumber } = parsed;
+
+  if (!owner || !repo) {
+    const remote = await getRepoFromRemote();
+    owner = remote.owner;
+    repo = remote.repo;
+  }
+
+  spinner.text = `Searching draft split PRs from original PR #${originalPRNumber}...`;
+  const targets = await findDraftSplitPRsByOriginalPR(owner, repo, originalPRNumber);
+  spinner.stop();
+
+  if (targets.length === 0) {
+    console.log(
+      chalk.dim(
+        `No prsplit draft PRs found for original PR #${originalPRNumber}.`
+      )
+    );
+    return;
+  }
+
+  displayCleanupTargets(targets);
+  const confirmed = await askConfirmation(
+    `Close ${targets.length} draft PR(s) and delete their branches? (y/n): `
+  );
+  if (!confirmed) {
+    console.log(chalk.dim("Cancelled."));
+    return;
+  }
+
+  spinner.start("Closing draft PRs...");
+  await closePRs(owner, repo, targets);
+  spinner.succeed(chalk.green(`Closed ${targets.length} draft PR(s).`));
 }
 
 /**
@@ -192,6 +274,62 @@ function displayCreatedPRs(prs: CreatedPR[]): void {
     console.log(chalk.dim(`    ${pr.htmlUrl}`));
   }
   console.log();
+}
+
+function displayCleanupTargets(prs: CreatedPR[]): void {
+  console.log();
+  console.log(chalk.yellow("Draft PRs to close:"));
+  for (const pr of prs) {
+    console.log(`  #${pr.number} ${pr.title}`);
+    console.log(chalk.dim(`    ${pr.htmlUrl}`));
+  }
+  console.log();
+}
+
+function displayAdjustedProposal(
+  proposal: SplitProposal,
+  adjustments: ProposalAdjustment[]
+): void {
+  console.log();
+  console.log(chalk.yellow("Split plan was adjusted during CI/precheck repair:"));
+  for (const adjustment of adjustments) {
+    if (adjustment.kind === "file_move") {
+      const fromLabel =
+        adjustment.fromPartOrders && adjustment.fromPartOrders.length > 0
+          ? ` from part(s) ${adjustment.fromPartOrders.join(", ")}`
+          : "";
+      const filesLabel =
+        adjustment.files && adjustment.files.length > 0
+          ? `${adjustment.files.join(", ")}`
+          : "(no file details)";
+      console.log(
+        chalk.dim(
+          `  - Moved file(s)${fromLabel} to part #${adjustment.toPartOrder ?? "?"} (${formatAdjustmentReason(adjustment.reason)}): ${filesLabel}`
+        )
+      );
+      continue;
+    }
+
+    console.log(
+      chalk.dim(
+        `  - Collapsed part #${adjustment.collapsedPartOrder ?? "?"} "${adjustment.collapsedBranchName ?? "unknown"}" (${formatAdjustmentReason(adjustment.reason)}).`
+      )
+    );
+  }
+  displayProposal(proposal);
+}
+
+function formatAdjustmentReason(reason: ProposalAdjustment["reason"]): string {
+  if (reason === "build_failure_annotations") {
+    return "build failure annotations";
+  }
+  if (reason === "precheck_dependency") {
+    return "missing dependency precheck";
+  }
+  if (reason === "empty_after_repair") {
+    return "no remaining files";
+  }
+  return "AI repair";
 }
 
 /**
