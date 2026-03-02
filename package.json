@@ -1,6 +1,6 @@
 {
   "name": "prsplit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Split large PRs into reviewable chain PRs using AI",
   "type": "module",
   "bin": {
