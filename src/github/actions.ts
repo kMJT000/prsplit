@@ -56,14 +56,7 @@ export async function waitForBuildAndTest(
         runUrl = run.html_url;
 
         if (run.status === "completed") {
-          return buildResult(
-            owner,
-            repo,
-            runId,
-            run.conclusion,
-            runUrl,
-            options.commitSha
-          );
+          return buildResult(owner, repo, runId, run.conclusion, runUrl);
         }
       }
     } else {
@@ -74,14 +67,7 @@ export async function waitForBuildAndTest(
       });
 
       if (run.status === "completed") {
-        return buildResult(
-          owner,
-          repo,
-          runId,
-          run.conclusion,
-          runUrl,
-          options.commitSha
-        );
+        return buildResult(owner, repo, runId, run.conclusion, runUrl);
       }
     }
 
@@ -98,8 +84,7 @@ async function buildResult(
   repo: string,
   runId: number,
   conclusion: string | null,
-  runUrl: string,
-  commitSha: string
+  runUrl: string
 ): Promise<BuildAndTestResult> {
   if (conclusion === "success") {
     return {
@@ -109,13 +94,7 @@ async function buildResult(
     };
   }
 
-  const summary = await getFailureSummary(
-    owner,
-    repo,
-    runId,
-    conclusion,
-    commitSha
-  );
+  const summary = await getFailureSummary(owner, repo, runId, conclusion);
   return {
     success: false,
     summary,
@@ -127,8 +106,7 @@ async function getFailureSummary(
   owner: string,
   repo: string,
   runId: number,
-  conclusion: string | null,
-  commitSha: string
+  conclusion: string | null
 ): Promise<string> {
   const octokit = getOctokit();
   const { data } = await octokit.rest.actions.listJobsForWorkflowRun({
@@ -164,93 +142,7 @@ async function getFailureSummary(
     }
   }
 
-  const annotationLines = await collectFailureAnnotations(
-    owner,
-    repo,
-    commitSha
-  );
-  if (annotationLines.length > 0) {
-    lines.push("");
-    lines.push("Failure annotations:");
-    for (const annotationLine of annotationLines) {
-      lines.push(`- ${annotationLine}`);
-    }
-  }
-
   return lines.join("\n");
-}
-
-async function collectFailureAnnotations(
-  owner: string,
-  repo: string,
-  commitSha: string
-): Promise<string[]> {
-  const octokit = getOctokit();
-  const maxChecks = 5;
-  const maxAnnotations = 20;
-
-  try {
-    const { data } = await octokit.rest.checks.listForRef({
-      owner,
-      repo,
-      ref: commitSha,
-      per_page: 100,
-    });
-
-    const failedChecks = data.check_runs.filter((checkRun) =>
-      isFailureConclusion(checkRun.conclusion)
-    );
-
-    const lines: string[] = [];
-
-    for (const checkRun of failedChecks.slice(0, maxChecks)) {
-      const { data: annotations } = await octokit.rest.checks.listAnnotations({
-        owner,
-        repo,
-        check_run_id: checkRun.id,
-        per_page: 100,
-      });
-
-      for (const annotation of annotations) {
-        if (annotation.annotation_level !== "failure") {
-          continue;
-        }
-
-        const normalizedMessage = normalizeWhitespace(annotation.message ?? "");
-        if (!normalizedMessage) {
-          continue;
-        }
-
-        const lineNumber = annotation.start_line ?? annotation.end_line ?? 1;
-        const path = annotation.path || "(unknown)";
-        lines.push(`${path}:${lineNumber} ${normalizedMessage}`);
-
-        if (lines.length >= maxAnnotations) {
-          return lines;
-        }
-      }
-    }
-
-    return lines;
-  } catch {
-    // annotation取得失敗は致命扱いにせず、job/stepサマリのみ返す
-    return [];
-  }
-}
-
-function isFailureConclusion(conclusion: string | null): boolean {
-  return (
-    conclusion === "failure" ||
-    conclusion === "cancelled" ||
-    conclusion === "timed_out" ||
-    conclusion === "action_required" ||
-    conclusion === "startup_failure" ||
-    conclusion === "stale"
-  );
-}
-
-function normalizeWhitespace(message: string): string {
-  return message.replace(/\s+/g, " ").trim();
 }
 
 function sleep(ms: number): Promise<void> {
