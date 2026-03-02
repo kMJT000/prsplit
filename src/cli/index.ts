@@ -8,6 +8,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
 import { createInterface } from "readline";
+import { pathToFileURL } from "node:url";
 import {
   generateProposal,
   executeSplit,
@@ -51,37 +52,27 @@ program
       process.exit(1);
     }
 
-    await runSplitLoop(prIdentifier, model, dryRun, additionalPrompt);
+    const exitCode = await runSplitLoop(prIdentifier, model, dryRun, additionalPrompt);
+    process.exit(exitCode);
   });
 
 program
   .command("cleanup <pr>")
   .description("Close draft split PRs generated from the specified original PR")
   .action(async (prIdentifier: string) => {
-    try {
-      await runCleanup(prIdentifier);
-    } catch (error) {
-      if (error instanceof Error) {
-        console.error(chalk.red(`\nError: ${error.message}`));
-        if (process.env.DEBUG) {
-          console.error(error.stack);
-        }
-      } else {
-        console.error(chalk.red("\nAn unexpected error occurred."));
-      }
-      process.exit(1);
-    }
+    const exitCode = await runCleanup(prIdentifier);
+    process.exit(exitCode);
   });
 
 /**
  * 分割 → 確認 → 再実行のインタラクティブループ
  */
-async function runSplitLoop(
+export async function runSplitLoop(
   prIdentifier: string,
   model: AIModel,
   dryRun: boolean,
   additionalPrompt?: string
-): Promise<void> {
+): Promise<number> {
   const spinner = ora();
 
   const callbacks: OrchestratorCallbacks = {
@@ -113,7 +104,7 @@ async function runSplitLoop(
       );
 
       if (!result) {
-        process.exit(1);
+        return 1;
       }
 
       spinner.succeed(
@@ -127,7 +118,7 @@ async function runSplitLoop(
         console.log(
           chalk.dim("\nSkipping PR creation because --dry-run is enabled.")
         );
-        process.exit(0);
+        return 0;
       }
 
       // ユーザーに確認
@@ -151,7 +142,7 @@ async function runSplitLoop(
 
         spinner.succeed(chalk.green("Created draft PRs"));
         displayCreatedPRs(createdPRs);
-        process.exit(0);
+        return 0;
       }
 
       // 再実行の指示を取得
@@ -161,7 +152,7 @@ async function runSplitLoop(
 
       if (!additionalPrompt) {
         console.log(chalk.dim("Cancelled."));
-        process.exit(0);
+        return 0;
       }
     } catch (error) {
       spinner.stop();
@@ -173,49 +164,67 @@ async function runSplitLoop(
       } else {
         console.error(chalk.red("\nAn unexpected error occurred."));
       }
-      process.exit(1);
+      return 1;
     }
   }
 }
 
-async function runCleanup(prIdentifier: string): Promise<void> {
+export async function runCleanup(prIdentifier: string): Promise<number> {
   const spinner = ora();
-  spinner.start("Resolving repository and PR info...");
+  try {
+    spinner.start("Resolving repository and PR info...");
 
-  const parsed = parsePRIdentifier(prIdentifier);
-  let { owner, repo, number: originalPRNumber } = parsed;
+    const parsed = parsePRIdentifier(prIdentifier);
+    let { owner, repo, number: originalPRNumber } = parsed;
 
-  if (!owner || !repo) {
-    const remote = await getRepoFromRemote();
-    owner = remote.owner;
-    repo = remote.repo;
-  }
+    if (!owner || !repo) {
+      const remote = await getRepoFromRemote();
+      owner = remote.owner;
+      repo = remote.repo;
+    }
 
-  spinner.text = `Searching draft split PRs from original PR #${originalPRNumber}...`;
-  const targets = await findDraftSplitPRsByOriginalPR(owner, repo, originalPRNumber);
-  spinner.stop();
-
-  if (targets.length === 0) {
-    console.log(
-      chalk.dim(
-        `No prsplit draft PRs found for original PR #${originalPRNumber}.`
-      )
+    spinner.text = `Searching draft split PRs from original PR #${originalPRNumber}...`;
+    const targets = await findDraftSplitPRsByOriginalPR(
+      owner,
+      repo,
+      originalPRNumber
     );
-    return;
-  }
+    spinner.stop();
 
-  displayCleanupTargets(targets);
-  const confirmed = await askConfirmation(
-    `Close ${targets.length} draft PR(s) and delete their branches? (y/n): `
-  );
-  if (!confirmed) {
-    console.log(chalk.dim("Cancelled."));
-    return;
-  }
+    if (targets.length === 0) {
+      console.log(
+        chalk.dim(
+          `No prsplit draft PRs found for original PR #${originalPRNumber}.`
+        )
+      );
+      return 0;
+    }
 
-  spinner.start("Closing draft PRs...");
-  await closePRs(owner, repo, targets);
-  spinner.succeed(chalk.green(`Closed ${targets.length} draft PR(s).`));
+    displayCleanupTargets(targets);
+    const confirmed = await askConfirmation(
+      `Close ${targets.length} draft PR(s) and delete their branches? (y/n): `
+    );
+    if (!confirmed) {
+      console.log(chalk.dim("Cancelled."));
+      return 0;
+    }
+
+    spinner.start("Closing draft PRs...");
+    await closePRs(owner, repo, targets);
+    spinner.succeed(chalk.green(`Closed ${targets.length} draft PR(s).`));
+    return 0;
+  } catch (error) {
+    spinner.stop();
+    if (error instanceof Error) {
+      console.error(chalk.red(`\nError: ${error.message}`));
+      if (process.env.DEBUG) {
+        console.error(error.stack);
+      }
+    } else {
+      console.error(chalk.red("\nAn unexpected error occurred."));
+    }
+    return 1;
+  }
 }
 
 /**
@@ -308,4 +317,6 @@ function askInput(prompt: string): Promise<string> {
   });
 }
 
-program.parse();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  program.parse();
+}
