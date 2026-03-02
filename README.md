@@ -181,9 +181,33 @@ npm run build
 # Run in development mode
 npm run dev -- 123
 
-# Run tests
+# Run unit + integration tests (default)
 npm test
+
+# Run integration tests only
+npm run test:integration
+
+# Run real LLM tests (requires real API keys + PR input)
+export GITHUB_TOKEN=ghp_xxxxx
+export ANTHROPIC_API_KEY=sk-ant-xxxxx
+export OPENAI_API_KEY=sk-xxxxx
+export PRSPLIT_TEST_PR=https://github.com/owner/repo/pull/123
+npm run test:llm
+
+# Run manual GitHub E2E preflight checks
+export PRSPLIT_TEST_REPO_FULL_NAME=owner/repo
+npm run test:github:manual
 ```
+
+### Test layers
+
+- `npm test`: unit + integration (`tests/e2e/**` is excluded)
+- `npm run test:llm`: real LLM integration (Claude + Codex), invariant-based assertions
+- `npm run test:github:manual`: preflight for manual GitHub side-effect E2E
+
+For the full manual GitHub E2E checklist (split -> merge chain -> cleanup), see:
+
+- [docs/manual-github-e2e.md](docs/manual-github-e2e.md)
 
 ## License
 
