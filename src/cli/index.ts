@@ -87,7 +87,6 @@ export async function runSplitLoop(
     },
   };
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       // 分割提案を生成
