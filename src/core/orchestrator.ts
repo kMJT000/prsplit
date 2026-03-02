@@ -58,6 +58,7 @@ export async function generateProposal(
   prNumber: number;
   headBranch: string;
   baseBranch: string;
+  originalPRTitle: string;
   files: DiffFile[];
 } | null> {
   const { prIdentifier, model, additionalPrompt } = options;
@@ -132,6 +133,7 @@ export async function generateProposal(
     prNumber,
     headBranch: prInfo.head,
     baseBranch: prInfo.base,
+    originalPRTitle: prInfo.title,
     files: diffFiles,
   };
 }
@@ -144,6 +146,7 @@ export async function executeSplit(
   owner: string,
   repo: string,
   originalPRNumber: number,
+  originalPRTitle: string,
   headBranch: string,
   baseBranch: string,
   files: DiffFile[],
@@ -216,14 +219,16 @@ export async function executeSplit(
       );
 
       // ドラフトPRを作成
+      const shortenedPartTitle = limitTitleWords(part.title, 3);
+      const formattedPRTitle = `${originalPRTitle} [${part.order}/${proposal.parts.length}] ${shortenedPartTitle}`;
       callbacks.onProgress(
-        `[${part.order}/${proposal.parts.length}] Creating PR "${part.title}"...`
+        `[${part.order}/${proposal.parts.length}] Creating PR "${formattedPRTitle}"...`
       );
 
       const pr = await createDraftPR(
         owner,
         repo,
-        `[${part.order}/${proposal.parts.length}] ${part.title}`,
+        formattedPRTitle,
         description,
         resolvedBranchName,
         previousBranch
@@ -362,4 +367,12 @@ function generateChainWorkflows(
   }
 
   return workflows;
+}
+
+function limitTitleWords(title: string, maxWords: number): string {
+  const words = title.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) {
+    return title.trim();
+  }
+  return words.slice(0, maxWords).join(" ");
 }
