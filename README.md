@@ -18,7 +18,7 @@ Reviewing PRs with many file changes is a heavy burden for reviewers. `prsplit` 
 ## Installation
 
 ```bash
-npm install -g prsplit
+npm i @kmjt000/prsplit
 ```
 
 **Requirements**: Node.js 20+
