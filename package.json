@@ -10,7 +10,11 @@
     "clean": "rimraf dist",
     "build": "npm run clean && tsc && node --eval \"require('node:fs').chmodSync('dist/cli/index.js', 0o755)\"",
     "dev": "tsx src/cli/index.ts",
-    "test": "vitest run",
+    "test": "vitest run --exclude \"tests/e2e/**\"",
+    "test:integration": "vitest run tests/integration",
+    "test:llm": "RUN_REAL_LLM_TESTS=1 vitest run tests/e2e/llm.e2e.test.ts",
+    "test:github:manual": "RUN_MANUAL_GITHUB_E2E=1 vitest run tests/e2e/github.manual.e2e.test.ts",
+    "test:all": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src/",
     "prepublishOnly": "npm run build"
