@@ -7,6 +7,7 @@ const mockOctokit = {
       getContent: vi.fn(),
     },
     git: {
+      createRef: vi.fn(),
       createBlob: vi.fn(),
       createTree: vi.fn(),
       createCommit: vi.fn(),
@@ -19,11 +20,146 @@ vi.mock("../src/github/client.js", () => ({
   getOctokit: () => mockOctokit,
 }));
 
-import { commitFilesToBranch } from "../src/github/branch.js";
+import {
+  commitFilesToBranch,
+  createBranch,
+  validateRelativeJsImportsOnRef,
+} from "../src/github/branch.js";
+
+const encodeBase64 = (content: string): string =>
+  Buffer.from(content, "utf-8").toString("base64");
+
+describe("createBranch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockOctokit.rest.git.createRef.mockResolvedValue({});
+  });
+
+  it("未使用ブランチ名ならそのまま作成する", async () => {
+    const created = await createBranch("acme", "repo", "feat/part-1", "base-sha");
+
+    expect(created).toBe("feat/part-1");
+    expect(mockOctokit.rest.git.createRef).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "repo",
+      ref: "refs/heads/feat/part-1",
+      sha: "base-sha",
+    });
+  });
+
+  it("ブランチ名が重複したら連番サフィックスで再試行する", async () => {
+    mockOctokit.rest.git.createRef
+      .mockRejectedValueOnce({
+        status: 422,
+        message: "Reference already exists",
+      })
+      .mockResolvedValueOnce({});
+
+    const created = await createBranch("acme", "repo", "feat/part-1", "base-sha");
+
+    expect(created).toBe("feat/part-1-1");
+    expect(mockOctokit.rest.git.createRef).toHaveBeenNthCalledWith(1, {
+      owner: "acme",
+      repo: "repo",
+      ref: "refs/heads/feat/part-1",
+      sha: "base-sha",
+    });
+    expect(mockOctokit.rest.git.createRef).toHaveBeenNthCalledWith(2, {
+      owner: "acme",
+      repo: "repo",
+      ref: "refs/heads/feat/part-1-1",
+      sha: "base-sha",
+    });
+  });
+
+  it("重複以外のエラーでは即失敗する", async () => {
+    mockOctokit.rest.git.createRef.mockRejectedValue({
+      status: 403,
+      message: "Forbidden",
+    });
+
+    await expect(
+      createBranch("acme", "repo", "feat/part-1", "base-sha")
+    ).rejects.toThrow('Failed to create branch "feat/part-1".');
+    expect(mockOctokit.rest.git.createRef).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("validateRelativeJsImportsOnRef", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("相対 .js import の参照先が存在する場合は成功する", async () => {
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      async ({ path }: { path: string }) => {
+        if (path === "src/core/orchestrator.ts") {
+          return {
+            data: {
+              type: "file",
+              content: encodeBase64(
+                'import { generateWorkflowYaml } from "../github/workflow.js";'
+              ),
+            },
+          };
+        }
+
+        if (path === "src/github/workflow.ts") {
+          return {
+            data: {
+              type: "file",
+              content: encodeBase64("export const ok = true;"),
+            },
+          };
+        }
+
+        throw { status: 404, message: "Not Found" };
+      }
+    );
+
+    await expect(
+      validateRelativeJsImportsOnRef(
+        "acme",
+        "repo",
+        "feat/integrate-workflow",
+        ["src/core/orchestrator.ts"]
+      )
+    ).resolves.toBeUndefined();
+  });
+
+  it("相対 .js import の参照先が存在しない場合は失敗する", async () => {
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      async ({ path }: { path: string }) => {
+        if (path === "src/core/orchestrator.ts") {
+          return {
+            data: {
+              type: "file",
+              content: encodeBase64(
+                'import { generateWorkflowYaml } from "../github/workflow.js";'
+              ),
+            },
+          };
+        }
+
+        throw { status: 404, message: "Not Found" };
+      }
+    );
+
+    await expect(
+      validateRelativeJsImportsOnRef(
+        "acme",
+        "repo",
+        "feat/integrate-workflow",
+        ["src/core/orchestrator.ts"]
+      )
+    ).rejects.toThrow('Build precheck failed: "src/core/orchestrator.ts"');
+  });
+});
 
 describe("commitFilesToBranch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockOctokit.rest.git.createRef.mockResolvedValue({});
     mockOctokit.rest.git.createTree.mockResolvedValue({ data: { sha: "tree-sha" } });
     mockOctokit.rest.git.createCommit.mockResolvedValue({
       data: { sha: "commit-sha" },
