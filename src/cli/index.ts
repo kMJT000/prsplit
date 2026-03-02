@@ -138,7 +138,6 @@ async function runSplitLoop(
         spinner.start("Creating draft PRs...");
 
         const createdPRs = await executeSplit(
-          model,
           result.proposal,
           result.owner,
           result.repo,

@@ -6,10 +6,7 @@ import {
   type DiffFile,
 } from "../src/utils/diff.js";
 import { parseAIResponse, buildSplitPrompt } from "../src/ai/prompt.js";
-import {
-  suggestFilesForBuildRepair,
-  validateProposal,
-} from "../src/ai/splitter.js";
+import { validateProposal } from "../src/ai/splitter.js";
 import { parsePRIdentifier } from "../src/github/client.js";
 
 describe("parseDiffFiles", () => {
@@ -321,52 +318,5 @@ describe("buildSplitPrompt", () => {
     );
     expect(prompt).toContain("Additional Instructions");
     expect(prompt).toContain("ロジック層を細かく");
-  });
-});
-
-describe("suggestFilesForBuildRepair", () => {
-  it("AIレスポンスのfilesToMoveを配列として返す", async () => {
-    const mockClient = {
-      complete: async () => '{"filesToMove":["src/types/user.ts","src/services/user.ts"]}',
-    };
-
-    const result = await suggestFilesForBuildRepair(mockClient, {
-      failingPartOrder: 2,
-      failingPartTitle: "feat: service layer",
-      currentPartFiles: ["src/services/order.ts"],
-      candidateFilesByPart: [
-        {
-          order: 3,
-          title: "feat: api layer",
-          files: ["src/types/user.ts", "src/services/user.ts"],
-        },
-      ],
-      failureSummary: "build-and-test failed",
-    });
-
-    expect(result).toEqual(["src/types/user.ts", "src/services/user.ts"]);
-  });
-
-  it("コードブロック内JSONもパースできる", async () => {
-    const mockClient = {
-      complete: async () =>
-        '```json\n{"filesToMove":["src/shared/errors.ts"]}\n```',
-    };
-
-    const result = await suggestFilesForBuildRepair(mockClient, {
-      failingPartOrder: 1,
-      failingPartTitle: "feat: db layer",
-      currentPartFiles: ["src/db/migration.ts"],
-      candidateFilesByPart: [
-        {
-          order: 2,
-          title: "feat: logic layer",
-          files: ["src/shared/errors.ts"],
-        },
-      ],
-      failureSummary: "tests failed",
-    });
-
-    expect(result).toEqual(["src/shared/errors.ts"]);
   });
 });
