@@ -1,6 +1,6 @@
 {
   "name": "@kmjt000/prsplit",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Split large PRs into reviewable chain PRs using AI",
   "type": "module",
   "bin": {
