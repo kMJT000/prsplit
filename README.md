@@ -129,8 +129,8 @@ Each target PR is closed and its branch is deleted after confirmation.
 
 1. **Default strategy**: Layer-based (DB -> logic -> API -> UI)
 2. **Fallback**: If layer structure is unclear, AI decides
-3. **Chain dependency**: Each split PR is initially based on the previous PR branch
-4. **File-level exactness**: Every changed file belongs to exactly one split PR, and the chain reconstructs the original PR head state
+3. **Chain dependency**: Each split PR is based on the previous PR branch
+4. **Exact match**: Sum of all split PR diffs = original PR diff
 
 ```mermaid
 flowchart LR
@@ -142,48 +142,15 @@ flowchart LR
   A -. exact match .-> F
 ```
 
-### Built-in validation
-
-Before PR creation, `prsplit` validates that:
-
-- All files from the original PR are included in the split result
-- No file appears in multiple split PRs
-- Split PR order is sequential (`1..N`)
-- Relative `.js` imports in changed TypeScript files resolve on each generated split branch
-
-### Optional manual verification
-
-After generating split branches, you can compare the original PR branch and the last split branch:
-
-```bash
-# 1) Verify changed-file set consistency from the same base
-git diff --name-status <base_branch>..<original_pr_branch>
-git diff --name-status <base_branch>..<last_split_branch>
-
-# 2) Verify final content equivalence
-git diff --stat <original_pr_branch>..<last_split_branch>
-```
-
-If the last command shows no changes, the final split chain matches the original PR branch content.
-
 ## Merge flow
 
 ```
-PR #1 (DB)    -> merge -> retarget + undraft PR #2 (Logic)
-PR #2 (Logic) -> merge -> retarget + undraft PR #3 (API)
-PR #3 (API)   -> merge -> retarget + undraft PR #4 (UI)
-PR #4 (UI)    -> merge -> automatically close original PR
+PR #1 (DB)    -> merge -> undraft PR #2 (Logic)
+PR #2 (Logic) -> merge -> undraft PR #3 (API)
+PR #3 (API)   -> merge -> automatically close original PR
 ```
 
-A GitHub Actions workflow is generated automatically. It detects when the previous PR is merged, updates the next PR base branch to match the original PR base branch, and undrafts the next PR. After the final split PR is merged, it closes the original PR and removes only the chain workflow files generated for that split run.
-
-### Workflow prerequisites
-
-- GitHub Actions must be enabled on the repository.
-- The token used by `prsplit` must have permission to create branches/PRs and commit workflow files.
-- Workflow jobs require `pull-requests: write` and `contents: write` to retarget PR bases, close the original PR, and delete generated workflow files.
-- If branch protection blocks base retargeting or automation on split branches, retarget/undraft/close/cleanup automation may fail.
-- If automation cannot run, you can still merge split PRs manually in order.
+A GitHub Actions workflow is generated automatically. It detects when the previous PR is merged and undrafts the next PR.
 
 ```mermaid
 stateDiagram-v2
@@ -193,9 +160,7 @@ stateDiagram-v2
   PR2_Ready --> PR2_Merged: merge PR #2
   PR2_Merged --> PR3_Ready: auto-retarget-base+undraft PR #3
   PR3_Ready --> PR3_Merged: merge PR #3
-  PR3_Merged --> PR4_Ready: auto-retarget-base+undraft PR #4
-  PR4_Ready --> PR4_Merged: merge PR #4
-  PR4_Merged --> OriginalPR_Closed: auto-close original PR
+  PR3_Merged --> OriginalPR_Closed: auto-close original PR
   OriginalPR_Closed --> [*]
 ```
 
